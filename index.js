@@ -4,6 +4,7 @@ import {
     Operation,
     TransactionBuilder,
     Networks,
+    Transaction,
     Horizon,
     StrKey,
     Keypair,
@@ -79,6 +80,8 @@ const USDCasset = new Asset("USDC", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJA
 const TrustAsset = new Asset("TRUST", "GD4IBE2P3LXDLXCL5G5LNNPPZLOCWDGTXJF44UHWLHHUDBZDYYRRJDYE");
 let sessions = {};
 let usersCreation = {};
+let usersTransactions = {};
+
 const greetedUsers = new Set();
 const lastAction = {}; // track last state per user
 
@@ -949,6 +952,46 @@ Un asesor de AUR te responderá lo antes posible.`,
                 phoneNumberId
             );
             break;
+        case "GROUP_CONTRIBUTE":
+            //const balance = await UserBalance(session.address);
+            const group = session.groupsCache.find(g => g.id === session.groupId);
+
+            if (!group) {
+                console.log("Grupo no encontrado en cache");
+                return;
+            }
+
+            console.log("Grupo activo:", group);
+            updateSession(from, {
+                to: group.multisig_address,
+                amount: group.group_amount,
+            });
+            usersTransactions[session.address] = {
+                token: session.tokennotification,
+                to: group.multisig_address,
+                amount: group.group_amount,
+                phone: from,
+                name: session.name,
+                date: new Date(),
+            };
+            await sendMenu({
+                to: from,
+                phoneNumberId,
+                text: `📤 Confirmar envío
+
+Destino:
+${group.multisig_address}
+
+Monto:
+${group.group_amount} XLM
+
+¿Confirmas la transacción?`,
+                buttons: [
+                    { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
+                    { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
+                ],
+            });
+            break;
 
         case "MENU_MY_ACCOUNT":
             await sendWhatsAppText(
@@ -1145,6 +1188,7 @@ async function getUserGroups(phoneid) {
             g.payment_interval_days,
             g.created_at AS group_created_at,
             g.is_active,
+            g.multisig_address,
             
             ug.joined_at AS my_joined_at,
             
@@ -1248,19 +1292,21 @@ async function createAccount(
     id,
     xdr,
     status,
-    network
+    network,
+    from_phone,
   )
   VALUES (
     gen_random_uuid(),
     $1,
     'PENDING',
-    'TESTNET'
+    'TESTNET',
+    $2
   )
   RETURNING id, status, created_at;
 `;
 
 
-        const values = [xdr];
+        const values = [xdr, tokennotification];
         const response = await conn.query(query, values);
         const txRow = response.rows[0];
 
@@ -1315,7 +1361,6 @@ Pide un código AUR para unirte 💫`;
 async function handleMainGroups(phone, phoneNumberId) {
     const session = sessions[phone];
     const groups = await getUserGroups(phone);
-
     // store for selection
     sessions[phone] = {
         ...session,
@@ -2050,7 +2095,7 @@ app.post("/usuarios", async (req, res) => {
 });
 app.post("/confirm-creation", async (req, res) => {
     console.log("Received creation confirmation:", req.body);
-    const { txHash, multisigAddress, success } = req.body;
+    const { txHash, to, from, token, success } = req.body;
     const session = usersCreation[multisigAddress];
     /**        usersCreation[fresh.publicKey()] = {
                 groupId,
@@ -2155,6 +2200,112 @@ app.post("/confirm-creation", async (req, res) => {
     }
 });
 
+async function findPendingTransactionForUser(txHash, fromPhone, network = "TESTNET") {
+    const rows = await conn.query(`
+        SELECT id, xdr, status, network, created_at, from_phone
+        FROM stellar_transactionsx
+        WHERE status = 'PENDING'
+          AND network = $1
+          AND from_phone = $2
+          AND created_at > NOW() - INTERVAL '48 hours'   -- prevent searching very old rows
+        ORDER BY created_at DESC
+        LIMIT 5                                           -- usually 1 or 0 rows
+    `, [network, fromPhone]);
+
+    if (rows.rowCount === 0) return null;
+
+    const networkPassphrase = network === "TESTNET" ? Networks.TESTNET : Networks.PUBLIC;
+
+    for (const row of rows.rows) {
+        try {
+            const tx = new Transaction(row.xdr, networkPassphrase);
+
+            const computedHash = tx.hash().toString('hex');           // ← usually works perfectly in Node
+            console.log(`Comparing hashes for tx ${row.id}: computed ${computedHash} vs provided ${txHash}`);
+
+            if (computedHash === txHash) {
+                return row;
+            }
+        } catch (e) {
+            console.warn(`Bad XDR in tx ${row.id}: ${e.message}`);
+        }
+    }
+
+    return null;
+}
+app.post("/confirm-payment", async (req, res) => {
+    console.log("Received payment creation:", req.body);
+    const { txHash, to, from, token, success } = req.body;
+    const session = usersTransactions[from];
+    /**usersTransactions[session.address] = {
+                    to: group.multisig_address,
+                    amount: group.group_amount,
+                    phone: from,
+                    name: session.name,
+                    date: new Date(),
+                }; */
+    if (!txHash || !to || !from) {
+        return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // Security: must come from active session flow
+    if (!session) {
+        return res.status(403).json({ error: "No active activation flow or session expired" });
+    }
+    if (token !== session.token) {
+        return res.status(403).json({ error: "Invalid token" });
+    }
+
+
+    // Timeout protection (max 3 min)
+    /*if (Date.now() - session.date > 180_000_000) {
+        usersTransactions[from] = null; // cleanup
+        return res.status(410).json({ error: "Activation flow expired" });
+    }*/
+    // 2. Confirm address matches what we expected
+    if (to !== session.to) {
+        throw new Error("Multisig address mismatch");
+    }
+    if (!success) {
+        usersTransactions[from] = null; // cleanup
+        return res.status(400).json({ error: "Creation failed in wallet" });
+    }
+    const match = await findPendingTransactionForUser(txHash, token, "TESTNET");
+    try {
+        // 1. Verify tx on chain (fast check)
+        const txRecord = await server.transactions()
+            .transaction(txHash)
+            .call();
+        if (match) {
+            await conn.query(`
+        UPDATE stellar_transactionsx
+        SET status     = $1,
+            tx_hash    = $2,
+            updated_at = NOW()
+        WHERE id = $3
+    `, [txRecord.successful ? 'SUCCESS' : 'FAILED', txHash, match.id]);
+        }
+
+
+        // 3. Save confirmed address in DB (public only!)
+        // 6. CLEANUP – delete secrets immediately
+        delete usersTransactions[from];
+
+        // 7. Response to signing app
+        await sendWhatsAppText(
+            session.phone,
+            "La transacción ha sido confirmada y verificada en la red. Gracias por tu aporte 🙌",
+            PHONE_NUMBER_ID
+        );
+        return res.status(200).json({ ok: true });
+
+    } catch (err) {
+        console.error(err);
+        delete usersTransactions[from]; // cleanup on error too
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 
 app.get("/transactions", async (req, res) => {
     const query = `
@@ -2228,19 +2379,21 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
     id,
     xdr,
     status,
-    network
+    network,
+    from_phone
   )
   VALUES (
     gen_random_uuid(),
     $1,
     'PENDING',
-    'TESTNET'
+    'TESTNET',
+    $2
   )
   RETURNING id, status, created_at;
 `;
 
 
-        const values = [xdr];
+        const values = [xdr, tokennotification];
         const response = await conn.query(query, values);
 
         const txRow = response.rows[0];
