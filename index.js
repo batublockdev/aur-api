@@ -48,6 +48,8 @@ function formatCOP(value) {
     }).format(value);
 }
 const UserBalance = async (address) => {
+
+
     console.log("Fetching balance for address:", address);
     const account = await server.loadAccount(address);
     const assetUsdcBalance = account.balances.find(
@@ -114,19 +116,31 @@ Tu saldo actual es de:
         ],
     },
 };
-MENUS.ONBOARDING2 = {
+MENUS.SOLICITUD = {
     text:
-        `👋 ¡Ey! Bienvenido a *AUR Cartera*
+        `*📊 Grupo: {groupName}*
+
+¿Qué quieres hacer?`,
+    buttons: [
+        { id: "CREATE_GASTO", title: "💸 Proponer gasto" },
+        { id: "CREATE_LOAN", title: "💰 Solicitar préstamo" },
+        { id: "REQUESTS", title: "📄 Ver solicitudes" },
+
+    ],
+},
+    MENUS.ONBOARDING2 = {
+        text:
+            `👋 ¡Ey! Bienvenido a *AUR Cartera*
 
 Aquí guardás tu plata, mandás dinero
 y ahorrás con tu gente 😄
 
 Fácil y seguro`,
-    buttons: [
-        { id: "ABOUT_CREATE_ACCOUNT", title: "🆕 Crear mi cuenta" },
-        { id: "ONBOARD_ABOUT", title: "❓ Qué es AUR" },
-    ],
-},
+        buttons: [
+            { id: "ABOUT_CREATE_ACCOUNT", title: "🆕 Crear mi cuenta" },
+            { id: "ONBOARD_ABOUT", title: "❓ Qué es AUR" },
+        ],
+    },
     MENUS.ABOUT = {
         text:
             `💡 *¿Qué es AUR?*
@@ -179,7 +193,40 @@ Desde aquí podrás ver tus grupos, hacer aportes y llevar el control de tus pag
         { id: "MAIN_HELP", title: "ℹ️ Ayuda" },
     ],
 };
+MENUS.TRANSACTION_CONFIRMED_GROUP_TX_BUTTON = {
+    text: `¡Pago confirmado en el grupo! ✅💸
 
+Transacción exitosa en la red Stellar.
+
+Detalles aquí:
+🔗 https://stellar.expert/explorer/testnet/tx/{hash}
+
+Gracias por tu aporte en *{groupName}* 🙌
+¡Vamos por más! 🔥`,
+    buttons: [
+        {
+            id: "MENU_BACK",
+            title: "⬅️ Volver",
+        },
+    ],
+
+};
+MENUS.TRANSACTION_CONFIRMED_PRIVATE = {
+    text: `¡Transacción confirmada! ✅👍
+
+Tu pago se realizó exitosamente en la red Stellar.
+
+Puedes ver todos los detalles aquí:
+🔗 https://stellar.expert/explorer/testnet/tx/{hash}
+¡Gracias por usar el servicio! 🚀`,
+    buttons: [
+        {
+            id: "MENU_BACK",
+            title: "⬅️ Volver",
+        },
+    ],
+
+};
 MENUS.CREATE_ACCOUNT = {
     text: `👍 Vamos paso a paso
 
@@ -366,38 +413,7 @@ async function showMenu(menuKey, to, phoneNumberId, vars = {}) {
         footerText: menu.footerText,
     });
 }
-async function sendOpenAppLink(to, phoneNumberId) {
-    await fetch(
-        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-            },
-            body: JSON.stringify({
-                messaging_product: "whatsapp",
-                to,
-                type: "interactive",
-                interactive: {
-                    type: "button",
-                    body: {
-                        text: "📲 Abre la app para continuar",
-                    },
-                    action: {
-                        buttons: [
-                            {
-                                type: "url",
-                                title: "📲 Abrir App AUR",
-                                url: "https://aur.app.link/open",
-                            },
-                        ],
-                    },
-                },
-            }),
-        }
-    );
-}
+
 async function sendBackButton(to, phoneNumberId) {
     await sendMenu({
         to,
@@ -495,7 +511,7 @@ async function openGroupDetail(to, phoneNumberId, group, currentUserPhoneId) {
     if (isActive) {
         buttons = [
             { id: `GROUP_CONTRIBUTE`, title: "💸 Aportar ahora" },
-            { id: `GROUP_PROPOSE_EXPENSE`, title: "📝 Proponer gasto" },
+            { id: `GROUP_PROPOSE_EXPENSE`, title: "📝 Solicitudes" },
             { id: "GROUPS_HOME", title: "⬅️ Volver" },
         ];
     } else if (!isActive && isCreator) {
@@ -541,7 +557,7 @@ async function handleInteractive({ from, interactive, phoneNumberId, name }) {
 
     const session = sessions[from];
     console.log("Current session for user:", session);
-
+    let group = {};
 
     switch (action) {
         case "VERIFY_PHONE": {
@@ -852,6 +868,14 @@ Ahorro familia`,
                 ],
             });
             break;
+        case "CREATE_LOAN":
+            updateSession(from, {
+                step: "RECEIVE_CREATE_LOAN"
+            });
+            await sendWhatsAppText(
+                from,
+                `💰  ¿Cuánto deseas pedir prestado?`, phoneNumberId);
+            break;
         case "SEND_VOICE":
             updateSession(from, { step: "SEND_WAITING_VOICE" });
 
@@ -877,7 +901,7 @@ Ejemplo:
             await showMenu("HELP", from, phoneNumberId);
             break;
         case "MAIN_MONEY":
-
+            await sendWhatsAppText(from, "⏳ Actualizando tu saldo...", phoneNumberId);
             const amount = await UserBalance(session.address);
             await showMenu("MY_MONEY", from, phoneNumberId, { name, amount });
             break;
@@ -904,7 +928,10 @@ Un asesor de AUR te responderá lo antes posible.`,
 
             // Optional: tag user as "needs support"
             break;
-
+        case "GROUP_PROPOSE_EXPENSE":
+            group = session.groupsCache.find(g => g.id === session.groupId);
+            await showMenu("SOLICITUD", from, phoneNumberId, { groupName: group.name });
+            break;
         case "GROUP_ACTIVATE":
             await handleActivateGroup(from, phoneNumberId, session.groupId, session);
             break;
@@ -922,6 +949,7 @@ Un asesor de AUR te responderá lo antes posible.`,
             break;
         case "ABOUT_CREATE_ACCOUNT":
             await showMenu("CREATE_ACCOUNT", from, phoneNumberId);
+
             break;
         case "ABOUT_BACK":
             await showMenu("ONBOARDING", from, phoneNumberId);
@@ -954,7 +982,7 @@ Un asesor de AUR te responderá lo antes posible.`,
             break;
         case "GROUP_CONTRIBUTE":
             //const balance = await UserBalance(session.address);
-            const group = session.groupsCache.find(g => g.id === session.groupId);
+            group = session.groupsCache.find(g => g.id === session.groupId);
 
             if (!group) {
                 console.log("Grupo no encontrado en cache");
@@ -966,14 +994,7 @@ Un asesor de AUR te responderá lo antes posible.`,
                 to: group.multisig_address,
                 amount: group.group_amount,
             });
-            usersTransactions[session.address] = {
-                token: session.tokennotification,
-                to: group.multisig_address,
-                amount: group.group_amount,
-                phone: from,
-                name: session.name,
-                date: new Date(),
-            };
+
             await sendMenu({
                 to: from,
                 phoneNumberId,
@@ -1042,14 +1063,22 @@ ${group.group_amount} XLM
                 await sendWhatsAppText(from, "⚠️ No pending transaction.", phoneNumberId);
                 return;
             }
+            usersTransactions[session.address] = {
+                token: session.tokennotification,
+                to: session.to,
+                amount: session.amount,
+                phone: from,
+                name: session.name,
+                date: new Date(),
+            };
             console.log("✅ Confirming voice transaction:", session);
 
-            await sendWhatsAppText(from, "⏳ Building transaction...", phoneNumberId);
+            await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
             await Buildtransaction(session.address, session.to, session.amount.toString(), session.tokennotification);
 
             await sendWhatsAppText(
                 from,
-                "📲 Open the app to confirm the transaction.",
+                "📲 Confirma la transacción en tu aplicación.",
                 phoneNumberId
             );
             break;
@@ -1423,6 +1452,9 @@ async function handleText({ from, text, phoneNumberId }) {
     const isMenu = ["menu", "start"].some(k => text.includes(k));
 
     if (isGreeting || isMenu) {
+
+        await sendWhatsAppText(from, "⏳ Actualizando tu saldo...", phoneNumberId);
+
         const amount = await UserBalance(session?.address);
         await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amount });
         return;
@@ -1467,6 +1499,7 @@ async function handleText({ from, text, phoneNumberId }) {
             amount,
             step: "SEND_CONFIRM"
         });
+
         await sendMenu({
             to: from,
             phoneNumberId,
@@ -1968,7 +2001,7 @@ async function getUser(phoneid) {
     const res = await conn.query(query, [phoneid]);
     return res.rows[0] || null;
 }
-import crypto from "crypto";
+import crypto, { hash } from "crypto";
 
 function generateOTP() {
     return Math.floor(100000 + Math.random() * 900000).toString();
@@ -2096,7 +2129,7 @@ app.post("/usuarios", async (req, res) => {
 app.post("/confirm-creation", async (req, res) => {
     console.log("Received creation confirmation:", req.body);
     const { txHash, to, from, token, success } = req.body;
-    const session = usersCreation[multisigAddress];
+    const session = usersCreation[to];
     /**        usersCreation[fresh.publicKey()] = {
                 groupId,
                 freshPublic: fresh.publicKey(),
@@ -2107,7 +2140,7 @@ app.post("/confirm-creation", async (req, res) => {
                 publicKeys: signerPublicKeys,
                 threshold,
             }; */
-    if (!txHash || !multisigAddress) {
+    if (!txHash || !to) {
         return res.status(400).json({ error: "Missing required fields" });
     }
 
@@ -2119,12 +2152,12 @@ app.post("/confirm-creation", async (req, res) => {
 
     // Timeout protection (max 3 min)
     if (Date.now() - session.startedAt > 180_000) {
-        usersCreation[multisigAddress] = null; // cleanup
+        usersCreation[to] = null; // cleanup
         return res.status(410).json({ error: "Activation flow expired" });
     }
 
     if (!success) {
-        usersCreation[multisigAddress] = null; // cleanup
+        usersCreation[to] = null; // cleanup
         return res.status(400).json({ error: "Creation failed in wallet" });
     }
 
@@ -2138,7 +2171,7 @@ app.post("/confirm-creation", async (req, res) => {
         }
 
         // 2. Confirm address matches what we expected
-        if (multisigAddress !== session.freshPublic) {
+        if (to !== session.freshPublic) {
             throw new Error("Multisig address mismatch");
         }
 
@@ -2147,7 +2180,7 @@ app.post("/confirm-creation", async (req, res) => {
         const signers = session.publicKeys; // your DB query
         const threshold = Math.ceil(signers.length * 0.67) || 2;
 
-        const multisigAccount = await server.loadAccount(multisigAddress);
+        const multisigAccount = await server.loadAccount(to);
 
         const configBuilder = new TransactionBuilder(multisigAccount, {
             fee: BASE_FEE,
@@ -2183,9 +2216,9 @@ app.post("/confirm-creation", async (req, res) => {
                     is_active     = true,
         activated_at  = NOW()
             WHERE id = $1
-        `, [session.groupId, multisigAddress]);
+        `, [session.groupId, to]);
         // 6. CLEANUP – delete secrets immediately
-        delete usersCreation[multisigAddress];
+        delete usersCreation[to];
 
         // 7. Response to signing app
         res.json({
@@ -2237,6 +2270,8 @@ app.post("/confirm-payment", async (req, res) => {
     console.log("Received payment creation:", req.body);
     const { txHash, to, from, token, success } = req.body;
     const session = usersTransactions[from];
+    let pago = false;
+    let groupName = "";
     /**usersTransactions[session.address] = {
                     to: group.multisig_address,
                     amount: group.group_amount,
@@ -2284,19 +2319,125 @@ app.post("/confirm-payment", async (req, res) => {
             updated_at = NOW()
         WHERE id = $3
     `, [txRecord.successful ? 'SUCCESS' : 'FAILED', txHash, match.id]);
+
+            console.log(`Transaction ${txHash} found in DB with status updated to ${txRecord.successful ? 'SUCCESS' : 'FAILED'}`);
+
+            try {
+                // 1. Load the transaction from Horizon / Stellar server
+                const txRecord = await server.transactions()
+                    .transaction(txHash)
+                    .call();
+
+
+                // Usually we work with the envelope XDR or operations directly
+                const opsResponse = await server.operations()
+                    .forTransaction(txHash)
+                    .call();
+
+                const operations = opsResponse.records || [];
+
+                if (operations.length === 0) {
+                    console.log(`No operations found in tx ${txHash}`);
+                    return { success: false, reason: 'no_operations' };
+                }
+                for (const op of operations) {
+                    if (op.type !== 'payment' && op.type !== 'path_payment_strict_send' && op.type !== 'path_payment_strict_receive') {
+                        continue; // skip non-payment ops
+                    }
+
+                    const fromAddress = op.source_account || txRecord.source_account; // fallback to tx source if op has no source
+                    const toAddress = op.to;
+                    const amount = op.amount;           // string in stroops / asset units
+                    const asset = op.asset_type === 'native' ? 'XLM' : op.asset_code;
+
+                    // Optional: skip if wrong asset
+                    if (asset !== 'YOUR_TOKEN_CODE' && asset !== 'XLM') continue;
+
+                    // 2. Check if destination is a known group multisig address
+                    const groupResult = await conn.query(`
+                SELECT id AS group_id, 
+                       name AS group_name,
+                       amount AS expected_amount,
+                       created_by
+                FROM groups
+                WHERE multisig_address = $1
+                  AND is_active = true
+                LIMIT 1
+            `, [toAddress]);
+
+                    if (groupResult.rowCount === 0) {
+                        console.log(`No active group found for destination ${toAddress}`);
+                        await showMenu("TRANSACTION_CONFIRMED_PRIVATE", session.phone, PHONE_NUMBER_ID, { groupName, hash: txHash });
+
+                        continue;
+                    }
+                    console.log(`Group ${groupResult.rows[0].group_name} found for destination ${toAddress}`);
+                    groupName = groupResult.rows[0].group_name;
+
+                    const group = groupResult.rows[0];
+
+                    // 3. Find which user sent this (from usuarios / user_addresses table)
+                    const userResult = await conn.query(`
+                SELECT phoneid, 
+                       address,
+                       tokennotification
+                FROM usuarios   -- or your table name: user_phoneid | address | tokennotification
+                WHERE address = $1
+                LIMIT 1
+            `, [fromAddress]);
+
+                    if (userResult.rowCount === 0) {
+                        console.log(`Unknown sender address: ${fromAddress}`);
+                        continue;
+                    }
+                    console.log(`User with phoneid ${userResult.rows[0].phoneid} found for sender address ${fromAddress}`);
+                    const payer = userResult.rows[0];
+
+                    // 4. Decide if this counts as a valid payment
+                    //    You can add more rules: exact amount, memo contains invite_code, etc.
+                    const isValidAmount = Math.abs(parseFloat(amount) - parseFloat(group.expected_amount)) < 0.01;
+
+
+                    // 5. Save to payments table
+                    const paymentNumber = await generatePaymentNumber(conn, payer.phoneid);
+
+                    await conn.query(`
+    INSERT INTO payments 
+        (user_phoneid, group_id, payment_number, amount, created_at, tx_hash, status)
+    VALUES 
+        ($1, $2, $3, $4, NOW(), $5, $6)
+    RETURNING id
+`, [
+                        payer.phoneid,
+                        group.group_id,
+                        paymentNumber,
+                        parseFloat(amount),
+                        txHash,
+                        isValidAmount ? 'SUCCESS' : 'AMOUNT_MISMATCH'
+                    ]);
+                    console.log(`Payment record created for user ${payer.phoneid} in group ${group.group_name} with amount ${amount}`);
+
+                    // Optional: send push notification via Expo using payer.tokennotification
+                    // await sendPushNotification(payer.tokennotification, `¡Pago registrado en ${group.group_name}!`);
+
+                    // Optional: update group stats, mark round as paid, etc.
+                    await showMenu("TRANSACTION_CONFIRMED_GROUP_TX_BUTTON", session.phone, PHONE_NUMBER_ID, { groupName, hash: txHash });
+                }
+
+
+            }
+            catch (err) {
+                console.error(`Error processing tx ${txHash}:`, err);
+
+                return { success: false, error: err.message };
+            }
         }
 
 
         // 3. Save confirmed address in DB (public only!)
-        // 6. CLEANUP – delete secrets immediately
+        // 6. CLE+.
+        // ANUP – delete secrets immediately
         delete usersTransactions[from];
-
-        // 7. Response to signing app
-        await sendWhatsAppText(
-            session.phone,
-            "La transacción ha sido confirmada y verificada en la red. Gracias por tu aporte 🙌",
-            PHONE_NUMBER_ID
-        );
         return res.status(200).json({ ok: true });
 
     } catch (err) {
@@ -2306,6 +2447,33 @@ app.post("/confirm-payment", async (req, res) => {
     }
 });
 
+async function generatePaymentNumber(conn, userPhoneId) {
+    // Find the highest number this user has used this month
+    const result = await conn.query(`
+        SELECT payment_number
+        FROM payments
+        WHERE user_phoneid = $1
+          AND payment_number LIKE 'PAY-' || TO_CHAR(NOW(), 'YYYYMM') || '-%'
+        ORDER BY payment_number DESC
+        LIMIT 1
+    `, [userPhoneId]);
+
+    let nextSeq = 1;
+
+    if (result.rowCount > 0) {
+        const lastNumber = result.rows[0].payment_number;
+        // Example: PAY-202603-00042  → extract 00042
+        const match = lastNumber.match(/-(\d+)$/);
+        if (match) {
+            nextSeq = parseInt(match[1], 10) + 1;
+        }
+    }
+
+    const monthPrefix = new Date().toISOString().slice(0, 7).replace('-', ''); // 202603
+    const paddedSeq = String(nextSeq).padStart(5, '0'); // 00001, 00042, etc.
+
+    return `PAY-${monthPrefix}-${paddedSeq}`;
+}
 
 app.get("/transactions", async (req, res) => {
     const query = `
