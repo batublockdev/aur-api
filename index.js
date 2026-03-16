@@ -83,6 +83,7 @@ const TrustAsset = new Asset("TRUST", "GD4IBE2P3LXDLXCL5G5LNNPPZLOCWDGTXJF44UHWL
 let sessions = {};
 let usersCreation = {};
 let usersTransactions = {};
+let pendingGroupAdd = {};
 
 const greetedUsers = new Set();
 const lastAction = {}; // track last state per user
@@ -868,6 +869,29 @@ Ahorro familia`,
                 ],
             });
             break;
+        case "CREATE_GASTO":
+
+            group = session.groupsCache.find(g => g.id === session.groupId);
+            updateSession(from, {
+                step: "WAITING_EXPENSE_TARGET",
+                groupMembers: group.members,
+            });
+            console.log("Grupo members:", group.members);
+            await sendWhatsAppText(
+                from,
+                `💸 Proponer un gasto al grupo
+
+El grupo deberá aprobar el envío antes de que se ejecute`, phoneNumberId);
+            await sendWhatsAppText(
+                from,
+                `👥 ¿A quién quieres enviar el dinero?
+
+${group.members.map((member, index) => `${index + 1}️⃣ ${member.phoneid}`).join('\n')}
+
+Escribe el número del miembro.
+
+O pega la dirección Stellar si el destinatario no está en la lista`, phoneNumberId);
+            break;
         case "CREATE_LOAN":
             updateSession(from, {
                 step: "RECEIVE_CREATE_LOAN"
@@ -1063,24 +1087,49 @@ ${group.group_amount} XLM
                 await sendWhatsAppText(from, "⚠️ No pending transaction.", phoneNumberId);
                 return;
             }
-            usersTransactions[session.address] = {
-                token: session.tokennotification,
-                to: session.to,
-                amount: session.amount,
-                phone: from,
-                name: session.name,
-                date: new Date(),
-            };
-            console.log("✅ Confirming voice transaction:", session);
+            if (!session.to || !session.amount) {
+                await sendWhatsAppText(from, "⚠️ Transacion sin informacion.", phoneNumberId);
+                return;
+            }
+            if (session.multisigTransaction) {
+                group = session.groupsCache.find(g => g.id === session.groupId);
+                usersTransactions[group.multisig_address] = {
+                    token: session.tokennotification,
+                    to: session.to,
+                    amount: session.amount,
+                    phone: from,
+                    name: session.name,
+                    date: new Date(),
+                };
 
-            await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
-            await Buildtransaction(session.address, session.to, session.amount.toString(), session.tokennotification);
+                await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
+                await Buildtransaction(group.multisig_address, session.to, session.amount.toString(), session.tokennotification, session);
+                await sendWhatsAppText(
+                    from,
+                    "📲 Los miembros deben confirmar la transacción en la aplicación.",
+                    phoneNumberId
+                );
+            } else {
 
-            await sendWhatsAppText(
-                from,
-                "📲 Confirma la transacción en tu aplicación.",
-                phoneNumberId
-            );
+                usersTransactions[session.address] = {
+                    token: session.tokennotification,
+                    to: session.to,
+                    amount: session.amount,
+                    phone: from,
+                    name: session.name,
+                    date: new Date(),
+                };
+                console.log("✅ Confirming voice transaction:", session);
+
+                await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
+                await Buildtransaction(session.address, session.to, session.amount.toString(), session.tokennotification, session);
+
+                await sendWhatsAppText(
+                    from,
+                    "📲 Confirma la transacción en tu aplicación.",
+                    phoneNumberId
+                );
+            }
             break;
 
         case "CANCEL_VOICE_SEND":
@@ -1208,71 +1257,73 @@ Se requieren **${threshold} de ${memberCount}** firmas para mover fondos.
 }
 async function getUserGroups(phoneid) {
     const query = `
-        SELECT 
-            g.id,
-            g.name,
-            g.invite_code,
-            g.created_by,
-            g.amount AS group_amount,
-            g.payment_interval_days,
-            g.created_at AS group_created_at,
-            g.is_active,
-            g.multisig_address,
-            
-            ug.joined_at AS my_joined_at,
-            
-            -- All members with their user info
-            (
-                SELECT json_agg(
-                    json_build_object(
-                        'phoneid', u.phoneid,
-                        'address', u.address,
-                        'tokennotification', u.tokennotification,
-                        'joined_at', ug2.joined_at
-                    )
-                    ORDER BY ug2.joined_at DESC
-                )
-                FROM user_groups ug2
-                JOIN usuarios u ON u.phoneid = ug2.user_phoneid
-                WHERE ug2.group_id = g.id
-            ) AS members,
-            
-            -- All payments in this group
-            (
-                SELECT json_agg(
-                    json_build_object(
-                        'id', p.id,
-                        'user_phoneid', p.user_phoneid,
-                        'payment_number', p.payment_number,
-                        'amount', p.amount,
-                        'created_at', p.created_at
-                    )
-                    ORDER BY p.created_at DESC
-                )
-                FROM payments p
-                WHERE p.group_id = g.id
-            ) AS payments,
-            
-            -- Total collected in the group
-            (
-                SELECT COALESCE(SUM(p2.amount), 0)
-                FROM payments p2
-                WHERE p2.group_id = g.id
-            ) AS total_amount_collected,
-            
-            -- Total paid by THIS user in the group
-            (
-                SELECT COALESCE(SUM(p3.amount), 0)
-                FROM payments p3
-                WHERE p3.group_id = g.id 
-                  AND p3.user_phoneid = $1
-            ) AS my_total_paid
+SELECT 
+    g.id,
+    g.name,
+    g.invite_code,
+    g.created_by,
+    g.amount AS group_amount,
+    g.payment_interval_days,
+    g.created_at AS group_created_at,
+    g.is_active,
+    g.multisig_address,
+    
+    ug.joined_at AS my_joined_at,
+    
+    -- All members with their user info
+    (
+    SELECT json_agg(
+        json_build_object(
+            'phoneid', u.phoneid,
+            'address', COALESCE(sa.public_addr, u.address),
+            'tokennotification', u.tokennotification,
+            'joined_at', ug2.joined_at
+        )
+        ORDER BY ug2.joined_at DESC
+    )
+    FROM user_groups ug2
+    JOIN usuarios u ON u.phoneid = ug2.user_phoneid
+    LEFT JOIN secondary_accounts sa 
+        ON sa.phone::text = u.phoneid::text
+    WHERE ug2.group_id = g.id
+) AS members,
+    
+    -- All payments in this group
+    (
+        SELECT json_agg(
+            json_build_object(
+                'id', p.id,
+                'user_phoneid', p.user_phoneid,
+                'payment_number', p.payment_number,
+                'amount', p.amount,
+                'created_at', p.created_at
+            )
+            ORDER BY p.created_at DESC
+        )
+        FROM payments p
+        WHERE p.group_id = g.id
+    ) AS payments,
+    
+    -- Total collected in the group
+    (
+        SELECT COALESCE(SUM(p2.amount), 0)
+        FROM payments p2
+        WHERE p2.group_id = g.id
+    ) AS total_amount_collected,
+    
+    -- Total paid by THIS user in the group
+    (
+        SELECT COALESCE(SUM(p3.amount), 0)
+        FROM payments p3
+        WHERE p3.group_id = g.id 
+          AND p3.user_phoneid = $1
+    ) AS my_total_paid
 
-        FROM user_groups ug
-        JOIN groups g ON g.id = ug.group_id
-        WHERE ug.user_phoneid = $1
-        ORDER BY ug.joined_at DESC;
-    `;
+FROM user_groups ug
+JOIN groups g ON g.id = ug.group_id
+WHERE ug.user_phoneid = $1
+ORDER BY ug.joined_at DESC;
+`;
 
     const res = await conn.query(query, [phoneid]);
 
@@ -1322,7 +1373,7 @@ async function createAccount(
     xdr,
     status,
     network,
-    from_phone,
+    from_phone
   )
   VALUES (
     gen_random_uuid(),
@@ -1346,7 +1397,7 @@ async function createAccount(
             xdr,
             network: "TESTNET",
         };
-
+        console.log(tokennotification)
         await sendTestPush(tokennotification, payload);
 
         console.log("INSERT stellar_transactions (XDR only)");
@@ -1457,6 +1508,7 @@ async function handleText({ from, text, phoneNumberId }) {
 
         const amount = await UserBalance(session?.address);
         await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amount });
+        updateSession(from, { step: null }); // reset any ongoing steps
         return;
     }
     if (session?.step === "SEND_WAITING_ADDRESS") {
@@ -1480,6 +1532,77 @@ async function handleText({ from, text, phoneNumberId }) {
             `💰 ¿Cuánto deseas enviar?`,
             phoneNumberId
         );
+        return;
+    }
+    if (session.step === "WAITING_EXPENSE_TARGET") {
+
+        let targetAddress;
+
+        const index = parseInt(text) - 1;
+
+        if (!isNaN(index) && session.groupMembers[index]) {
+            targetAddress = session.groupMembers[index].address;
+        }
+        else if (text.startsWith("G") && text.length > 40) {
+            const normalizedAddress = normalizeStellarAddress(text.trim());
+            targetAddress = normalizedAddress;
+            if (!normalizedAddress) {
+                await sendWhatsAppText(
+                    from,
+                    "⚠️ La dirección no es válida. Verifica y vuelve a intentar.",
+                    phoneNumberId
+                );
+                return;
+            }
+        }
+        else {
+            await sendWhatsAppText(
+                from,
+                "⚠️ Escribe un número válido o pega una dirección Stellar.",
+                phoneNumberId
+            );
+            return;
+        }
+
+
+        updateSession(from, {
+            step: "SEND_WAITING_REASON",
+            to: targetAddress,
+            multisigTransaction: true,
+        });
+        await sendWhatsAppText(
+            from,
+            "📝 Escribe el *motivo del gasto*.\n\nEjemplo:\nCompra de balón\nPizza para el grupo",
+            phoneNumberId
+        );
+
+
+        return;
+    }
+    if (session?.step === "SEND_WAITING_REASON") {
+
+        const reason = text.trim();
+
+        if (!reason || reason.length < 3) {
+            await sendWhatsAppText(
+                from,
+                "⚠️ Escribe un motivo válido para el gasto.",
+                phoneNumberId
+            );
+            return;
+        }
+
+        updateSession(from, {
+            step: "SEND_WAITING_AMOUNT",
+            reason: reason
+        });
+
+        await sendWhatsAppText(
+            from,
+            "💰 ¿Cuánto dinero deseas proponer enviar?\n\nEjemplo: 20000",
+            phoneNumberId
+        );
+
         return;
     }
     if (session?.step === "SEND_WAITING_AMOUNT") {
@@ -1671,7 +1794,10 @@ async function handleUnregisteredUser(data) {
         // store pending signup session
         updateSession(from, { step: "AWAITING_SIGNUP", inviteCode });
 
-        await addUserToGroup(from, inviteCode);
+        //await addUserToGroup(from, inviteCode);
+        pendingGroupAdd[from] = {
+            inviteCode
+        }
 
         await showMenu("CREATE_ACCOUNT2", from, data.phoneNumberId, { name });
 
@@ -1679,15 +1805,8 @@ async function handleUnregisteredUser(data) {
     }
 
     // no invite code → just guide them
-    await sendWhatsAppText(
-        from,
-        `👋 Hola ${name}!
+    await showMenu("ONBOARDING2", from, data.phoneNumberId, { name });
 
-Para usar AUR necesitas crear tu cuenta en la app primero.
-
-Cuando termines el registro, vuelve aquí y te conecto automáticamente.`,
-        data.phoneNumberId
-    );
 }
 function parseIncomingMessage(req) {
     const entry = req.body.entry?.[0];
@@ -1732,8 +1851,8 @@ app.post("/webhook", async (req, res) => {
                 if (!action) return;
 
                 // detect confirmation button
-                if (action.startsWith("confirm_")) {
-                    const phone = action.replace("confirm_", "");
+                if (action.startsWith("VERIFY_PHONE")) {
+                    const phone = data.from;
 
                     try {
                         await conn.query(
@@ -1758,10 +1877,30 @@ app.post("/webhook", async (req, res) => {
 
                     return;
                 }
+                if (action == "ONBOARD_ABOUT" || action == "ABOUT_CREATE_ACCOUNT") {
+                    await handleInteractive(data);
 
+                }
+
+
+            } else {
+
+                await handleUnregisteredUser(data, session);
             }
-            await handleUnregisteredUser(data, session);
             return res.sendStatus(200);
+        }
+        //await addUserToGroup(from, inviteCode);
+        const inviteCode = pendingGroupAdd[data.from];
+        if (!inviteCode) {
+
+        } else {
+            await addUserToGroup(data.from, inviteCode);
+            pendingGroupAdd[data.from] = {};
+            await sendWhatsAppText(
+                data.from,
+                "✅ Has sido aggregado al grupo",
+                data.phoneNumberId
+            );
         }
 
         if (data.type === "text") {
@@ -2027,7 +2166,7 @@ async function sendWhatsAppConfirm(to, phoneNumberId) {
                     {
                         type: "reply",
                         reply: {
-                            id: `confirm_${to}`,
+                            id: `VERIFY_PHONE`,
                             title: "✅ Confirmar"
                         }
                     }
@@ -2045,6 +2184,66 @@ async function sendWhatsAppConfirm(to, phoneNumberId) {
         body: JSON.stringify(payload)
     });
 }
+app.get("/user", async (req, res) => {
+    const { tokennotification, phoneid, address } = req.query;
+
+    let queryText = `
+SELECT 
+    u.phoneid,
+    u.address,
+    u.tokennotification,
+    s.public_addr AS secondary_address,
+    s.created_at
+FROM usuarios u
+LEFT JOIN secondary_accounts s
+ON u.phoneid = s.phone
+`;
+
+    const values = [];
+    const conditions = [];
+
+    if (!tokennotification && !phoneid && !address) {
+        return res.status(400).json({
+            success: false,
+            error: "At least one of tokennotification, phoneid, or address is required"
+        });
+    }
+
+    if (address) {
+        values.push(address);
+        conditions.push(`u.address = $${values.length}`);
+    }
+
+    if (tokennotification) {
+        values.push(tokennotification);
+        conditions.push(`u.tokennotification = $${values.length}`);
+    }
+
+    if (phoneid) {
+        values.push(phoneid);
+        conditions.push(`u.phoneid = $${values.length}`);
+    }
+
+    if (conditions.length > 0) {
+        queryText += ` WHERE ` + conditions.join(" AND ");
+    }
+
+    try {
+        const result = await conn.query(queryText, values);
+
+        res.status(200).json({
+            success: true,
+            found: result.rowCount,
+            data: result.rows
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+});
 app.post("/request-verification", async (req, res) => {
     const { contact } = req.body;
 
@@ -2053,6 +2252,9 @@ app.post("/request-verification", async (req, res) => {
     }
 
     try {
+
+
+        // 3️⃣ If not verified → insert/update
         await conn.query(
             `INSERT INTO contactsx (contact_value, verified)
              VALUES ($1, false)
@@ -2061,15 +2263,57 @@ app.post("/request-verification", async (req, res) => {
             [contact]
         );
 
+        // 4️⃣ Send WhatsApp verification
         await sendWhatsAppConfirm(contact, process.env.WHATSAPP_PHONE_ID);
 
-        res.json({ message: "Verification sent" });
+        res.json({
+            verified: false,
+            message: "Verification sent"
+        });
 
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: "Server error" });
     }
 });
+
+app.post("/secondary-account", async (req, res) => {
+    try {
+
+        const { phone, public_addr } = req.body;
+
+        if (!phone || !public_addr) {
+            return res.status(400).json({
+                error: "phone and public_addr are required"
+            });
+        }
+
+        const result = await conn.query(
+            `INSERT INTO secondary_accounts (phone, public_addr)
+ VALUES ($1, $2)
+ ON CONFLICT (phone)
+ DO UPDATE SET 
+     public_addr = EXCLUDED.public_addr,
+     created_at = NOW()
+ RETURNING phone, public_addr, created_at`,
+            [phone, public_addr]
+        );
+
+        return res.json({
+            success: true,
+            account: result.rows[0]
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        return res.status(500).json({
+            error: "Server error"
+        });
+    }
+});
+
 app.post("/check-verification", async (req, res) => {
     const { contact } = req.body;
 
@@ -2078,16 +2322,41 @@ app.post("/check-verification", async (req, res) => {
     }
 
     try {
-        const result = await conn.query(
+        const contactResult = await conn.query(
             "SELECT verified FROM contactsx WHERE contact_value = $1",
             [contact]
         );
-
-        if (result.rows.length === 0) {
+        console.log("Verification check for", contact, "Result:", contactResult.rows);
+        if (contactResult.rows.length === 0) {
+            // No record → send confirmation and return not verified
+            await sendWhatsAppConfirm(contact, process.env.WHATSAPP_PHONE_ID);
             return res.json({ verified: false });
         }
+        const isVerified = contactResult.rows[0].verified;
+        // 2. If verified → fetch full user data (same query as in request-verification)
+        if (isVerified) {
+            const userResult = await conn.query(
+                `SELECT 
+                    u.phoneid,
+                    u.address,
+                    u.tokennotification,
+                    s.public_addr AS secondary_address,
+                    s.created_at AS secondary_created_at
+                FROM usuarios u
+                LEFT JOIN secondary_accounts s
+                ON s.phone = u.phoneid
+                WHERE u.phoneid = $1`,
+                [contact]
+            );
 
-        res.json({ verified: result.rows[0].verified });
+            const user = userResult.rows[0] || null;
+
+            return res.json({
+                verified: true,
+                user: user
+            });
+        }
+        res.json({ verified: false });
 
     } catch (error) {
         console.error(error);
@@ -2095,7 +2364,7 @@ app.post("/check-verification", async (req, res) => {
     }
 });
 app.post("/usuarios", async (req, res) => {
-    const { phoneid, address, tokennotification } = req.body;
+    const { phoneid, address, tokennotification, name } = req.body;
 
     if (!phoneid || !address) {
         return res.status(400).json({ error: "phoneid and address required" });
@@ -2103,8 +2372,8 @@ app.post("/usuarios", async (req, res) => {
 
     try {
         const query = `
-      INSERT INTO usuarios (phoneid, address, tokennotification)
-      VALUES ($1, $2, $3)
+      INSERT INTO usuarios (phoneid, address, tokennotification, name)
+      VALUES ($1, $2, $3, $4)
       ON CONFLICT (phoneid)
       DO UPDATE SET
         address = EXCLUDED.address,
@@ -2112,7 +2381,7 @@ app.post("/usuarios", async (req, res) => {
       RETURNING *;
     `;
 
-        const values = [phoneid, address, tokennotification];
+        const values = [phoneid, address, tokennotification, name];
 
         const result = await conn.query(query, values);
 
@@ -2235,15 +2504,34 @@ app.post("/confirm-creation", async (req, res) => {
 
 async function findPendingTransactionForUser(txHash, fromPhone, network = "TESTNET") {
     const rows = await conn.query(`
-        SELECT id, xdr, status, network, created_at, from_phone
-        FROM stellar_transactionsx
-        WHERE status = 'PENDING'
-          AND network = $1
-          AND from_phone = $2
-          AND created_at > NOW() - INTERVAL '48 hours'   -- prevent searching very old rows
-        ORDER BY created_at DESC
-        LIMIT 5                                           -- usually 1 or 0 rows
-    `, [network, fromPhone]);
+SELECT DISTINCT ON (t.id) t.*
+FROM (
+    -- transactions created by the user
+    SELECT *
+    FROM stellar_transactionsx
+    WHERE  status = 'PENDING' AND from_phone = $1
+
+    UNION ALL
+
+    -- expense group transactions
+    SELECT t.*
+    FROM stellar_transactionsx t
+    JOIN user_groups ug ON ug.group_id = t.group_id
+    JOIN usuarios u ON u.phoneid = ug.user_phoneid
+    WHERE u.tokennotification = $1
+
+    UNION ALL
+
+    -- recovery transactions
+    SELECT t.*
+    FROM stellar_transactionsx t
+    JOIN recuperation_accountx ra ON ra.group_id = t.group_id
+    JOIN usuarios u ON u.phoneid = ra.user_phoneid
+    WHERE u.tokennotification = $1
+
+) t
+ORDER BY t.id, t.created_at DESC;                                          -- usually 1 or 0 rows
+    `, [fromPhone]);
 
     if (rows.rowCount === 0) return null;
 
@@ -2266,6 +2554,36 @@ async function findPendingTransactionForUser(txHash, fromPhone, network = "TESTN
 
     return null;
 }
+app.post("/confirm-transation", async (req, res) => {
+    console.log("Received payment creation:", req.body);
+    const { txHash, to, from, token, success } = req.body;
+    const match = await findPendingTransactionForUser(txHash, token, "TESTNET");
+    try {
+        // 1. Verify tx on chain (fast check)
+        const txRecord = await server.transactions()
+            .transaction(txHash)
+            .call();
+        if (match) {
+            await conn.query(`
+        UPDATE stellar_transactionsx
+        SET status     = $1,
+            tx_hash    = $2,
+            updated_at = NOW()
+        WHERE id = $3
+    `, [txRecord.successful ? 'SUCCESS' : 'FAILED', txHash, match.id]);
+
+            console.log(`Transaction ${txHash} found in DB with status updated to ${txRecord.successful ? 'SUCCESS' : 'FAILED'}`);
+
+        }
+
+        return res.status(200).json({ ok: true });
+
+    } catch (err) {
+        console.error(err);
+        delete usersTransactions[from]; // cleanup on error too
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
 app.post("/confirm-payment", async (req, res) => {
     console.log("Received payment creation:", req.body);
     const { txHash, to, from, token, success } = req.body;
@@ -2475,36 +2793,58 @@ async function generatePaymentNumber(conn, userPhoneId) {
     return `PAY-${monthPrefix}-${paddedSeq}`;
 }
 
-app.get("/transactions", async (req, res) => {
-    const query = `
-    SELECT id, xdr, status, created_at
-    FROM stellar_transactionsx
-    ORDER BY created_at DESC;
-  `;
-
+app.get("/transactions/:token", async (req, res) => {
     try {
-        const response = await conn.query(query);
-        res.status(200).send(response.rows);
+
+        const { token } = req.params;
+        console.log(`Fetching transactions for token: ${token}`);
+
+        const query = `
+SELECT DISTINCT ON (t.id) t.*
+FROM (
+    -- transactions created by the user
+    SELECT *
+    FROM stellar_transactionsx
+    WHERE from_phone = $1
+
+    UNION ALL
+
+    -- expense group transactions
+    SELECT t.*
+    FROM stellar_transactionsx t
+    JOIN user_groups ug ON ug.group_id = t.group_id
+    JOIN usuarios u ON u.phoneid = ug.user_phoneid
+    WHERE u.tokennotification = $1
+
+    UNION ALL
+
+    -- recovery transactions
+    SELECT t.*
+    FROM stellar_transactionsx t
+    JOIN recuperation_accountx ra ON ra.group_id = t.group_id
+    JOIN usuarios u ON u.phoneid = ra.user_phoneid
+    WHERE u.tokennotification = $1
+
+) t
+ORDER BY t.id, t.created_at DESC;
+        `;
+
+        const result = await conn.query(query, [token]);
+
+        res.json({
+            success: true,
+            transactions: result.rows
+        });
 
     } catch (error) {
-        console.error("Database error:", error);
-        res.status(500).send({ error: error.message });
-    }
-});
-app.get("/transactions", async (req, res) => {
-    const query = `
-    SELECT id, xdr, status, created_at
-    FROM stellar_transactionsx
-    ORDER BY created_at DESC;
-  `;
 
-    try {
-        const response = await conn.query(query);
-        res.status(200).send(response.rows);
+        console.error("Error fetching transactions:", error);
 
-    } catch (error) {
-        console.error("Database error:", error);
-        res.status(500).send({ error: error.message });
+        res.status(500).json({
+            success: false,
+            error: "Database error"
+        });
+
     }
 });
 function normalizeStellarAddress(input) {
@@ -2522,7 +2862,7 @@ function normalizeStellarAddress(input) {
 
     return cleaned;
 }
-async function Buildtransaction(address, destinationPublicKey, amount, tokennotification) {
+async function Buildtransaction(address, destinationPublicKey, amount, tokennotification, session) {
     try {
         console.log("Building transaction:", { address, destinationPublicKey, amount });
         const account = await server.loadAccount(address);
@@ -2548,20 +2888,30 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
     xdr,
     status,
     network,
-    from_phone
+    from_phone,
+    group_id,
+    concepto
   )
   VALUES (
     gen_random_uuid(),
     $1,
     'PENDING',
     'TESTNET',
-    $2
+    $2,
+    $3,
+    $4
   )
   RETURNING id, status, created_at;
 `;
+        let groupId = null;
+        let concepto = "";
+        console.log("Session data for transaction:", session);
+        if (session?.multisigTransaction) {
+            groupId = session.groupId;
+            concepto = session.reason;
+        }
 
-
-        const values = [xdr, tokennotification];
+        const values = [xdr, tokennotification, groupId, concepto];
         const response = await conn.query(query, values);
 
         const txRow = response.rows[0];
@@ -2573,8 +2923,13 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
             xdr,
             network: "TESTNET",
         };
-
-        await sendTestPush(tokennotification, payload);
+        if (session?.multisigTransaction) {
+            session.groupMembers.forEach(member => {
+                sendTestPush(member.tokennotification, payload);
+            });
+        } else {
+            await sendTestPush(tokennotification, payload);
+        }
 
         console.log("INSERT stellar_transactions (XDR only)");
 
@@ -2583,7 +2938,51 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
     }
 
 }
+app.put("/transactions/:id", async (req, res) => {
 
+    const { id } = req.params;
+    const { xdr } = req.body;
+    console.log(`Updating transaction ${id} with new XDR. XDR length: ${xdr ? xdr.length : 'null'}`);
+    const result = await conn.query(
+        `UPDATE stellar_transactionsx
+         SET
+            xdr = COALESCE($1, xdr)
+         WHERE id = $2
+         RETURNING *`,
+        [xdr, id]
+    );
+    console.log(`Transaction updated: ${id}`);
+    res.json(result.rows[0]);
+});
+
+app.post('/api/sign-transaction', async (req, res) => {
+    console.log("Received request to sign transaction. Body keys:", Object.keys(req.body));
+    try {
+        const { xdr, network = 'PUBLIC' } = req.body;   // expect base64 XDR
+
+        if (!xdr) {
+            return res.status(400).json({ error: 'Missing xdr' });
+        }
+
+        const networkPassphrase = network === 'TESTNET'
+            ? Networks.TESTNET
+            : Networks.PUBLIC;
+
+        // Load the (probably unsigned / partially signed) transaction
+        let tx = new Transaction(xdr, networkPassphrase);
+        const sourceKeypairAdmin = Keypair.fromSecret(process.env.ADMIN_KEY);
+        // Add your signature
+        tx.sign(sourceKeypairAdmin);
+
+        // Return the now-signed XDR (base64)
+        res.json({
+            signed_xdr: tx.toXDR()
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(400).json({ error: err.message });
+    }
+});
 
 async function sendTestPush(expoPushToken, solicitudData) {
     await fetch("https://exp.host/--/api/v2/push/send", {
@@ -2608,6 +3007,70 @@ async function sendTestPush(expoPushToken, solicitudData) {
 app.get("/", (req, res) => {
     res.send("Hello World!");
 });
+
+app.post("/guardian", async (req, res) => {
+    const { addresses, xdr, concepto } = req.body;
+    console.log(req.body)
+    console.log("hit guardian")
+
+    try {
+
+
+        // 1️⃣ Find users with those addresses
+        const users = await conn.query(
+            `SELECT phoneid FROM usuarios WHERE address = ANY($1)`,
+            [addresses]
+        );
+
+        if (users.rows.length === 0) {
+            throw new Error("No users found for provided addresses");
+        }
+
+
+
+
+
+        const phoneIds = users.rows.map(u => u.phoneid);
+
+        // 2️⃣ Insert into user_groups
+        const result = await conn.query(
+            `
+            INSERT INTO recuperation_accountx (user_phoneid)
+            SELECT phoneid
+            FROM usuarios
+            WHERE address = ANY($1)
+            RETURNING group_id
+            `,
+            [addresses]
+        );
+        if (result.rows.length === 0) {
+            throw new Error("No users found for provided addresses");
+        }
+
+        const group_id = result.rows[0].group_id;
+        // 3️⃣ Insert XDR transaction
+        await conn.query(
+            `
+      INSERT INTO stellar_transactionsx
+      (id, xdr, status, network, group_id, concepto, from_phone)
+      VALUES ( gen_random_uuid(), $1, 'PENDING', 'TESTNET', $2, $3, $4)
+      `,
+            [xdr, group_id, concepto, "x"]
+        );
+
+
+        res.json({
+            success: true,
+            users_added: phoneIds.length,
+            group_id
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.listen(3000, () => {
     console.log("🤖 WhatsApp bot running on port 3000");
 });
