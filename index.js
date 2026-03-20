@@ -22,7 +22,7 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 import axios from 'axios';
 import fs from 'fs';
 const server = new Horizon.Server(
-    "https://horizon-testnet.stellar.org",
+    "https://horizon.stellar.org",
 );
 const app = express();
 app.use(express.json());
@@ -49,7 +49,8 @@ function formatCOP(value) {
 }
 const UserBalance = async (address) => {
 
-
+    let amountusdc;
+    let amountxlm;
     console.log("Fetching balance for address:", address);
     const account = await server.loadAccount(address);
     const assetUsdcBalance = account.balances.find(
@@ -59,27 +60,22 @@ const UserBalance = async (address) => {
         (b) => b.asset_type === "native"
     );
     console.log("XLM balance:", xlmBalance?.balance);
-    /*if (xlmBalance) {
-        setenergyLevels(xlmBalance?.balance);
-    }*/
+    if (xlmBalance) {
+        amountxlm = xlmBalance?.balance;
+    }
     if (assetUsdcBalance) {
-
         console.log(`${USDCasset.getCode()} balance: ${assetUsdcBalance.balance}`);
-        let usd = await getUsdToCop(parseFloat(assetUsdcBalance.balance));
-        let formattedUsd = await formatCOP(usd);
-        console.log(formattedUsd, "Apx");
-        amount = assetUsdcBalance.balance;
+        amountusdc = assetUsdcBalance.balance;
     } else {
         console.log(`No ${USDCasset.getCode()} balance found`);
     }
-    return xlmBalance ? xlmBalance.balance : "0";
+    return { amountxlm, amountusdc }
 
 
 
 
 };
 const USDCasset = new Asset("USDC", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN");
-const TrustAsset = new Asset("TRUST", "GD4IBE2P3LXDLXCL5G5LNNPPZLOCWDGTXJF44UHWLHHUDBZDYYRRJDYE");
 let sessions = {};
 let usersCreation = {};
 let usersTransactions = {};
@@ -107,7 +103,8 @@ const MENUS = {
             
 Tu saldo actual es de:
 
-💵 {amount}
+💵 {amountxlm}
+💵 {amountusdc}
 
 ¿Qué quieres hacer con tu dinero?`,
         buttons: [
@@ -117,18 +114,47 @@ Tu saldo actual es de:
         ],
     },
 };
-MENUS.SOLICITUD = {
+
+MENUS.SWAP = {
+
     text:
-        `*📊 Grupo: {groupName}*
+        `💱 Convertir dinero
+
+¿Qué deseas hacer?`,
+    buttons: [
+        { id: "SWAP_XLM_USDC", title: "🔄 XLM → USDC" },
+        { id: "SWAP_USDC_XLM", title: "🔄 USDC → XLM" },
+        { id: "SWAP_BACK", title: "🔙 Volver" },
+    ],
+
+};
+
+MENUS.CREATED_GROUP = {
+    text: `¡Éxito! El grupo *{name}* ya está activo 🎉
+
+Cuenta multi-firma creada:
+{to}
+
+Se requieren **{threshold} de {members}** firmas para mover fondos.
+
+¿Qué quieres hacer ahora?`,
+    buttons: [
+        // { id: `GROUP_DETAIL_{groupid}`, title: "detalles grupo" },
+        { id: "GROUPS_HOME", title: "⬅️ Volver " }
+    ]
+},
+    MENUS.SOLICITUD = {
+        text:
+            `*📊 Grupo: {groupName}*
 
 ¿Qué quieres hacer?`,
-    buttons: [
-        { id: "CREATE_GASTO", title: "💸 Proponer gasto" },
-        { id: "CREATE_LOAN", title: "💰 Solicitar préstamo" },
-        { id: "REQUESTS", title: "📄 Ver solicitudes" },
+        buttons: [
+            { id: "CREATE_GASTO", title: "💸 Proponer gasto" },
+            { id: "CREATE_LOAN", title: "💰 Solicitar préstamo" },
+            { id: "REQUESTS", title: "📄 Ver solicitudes" },
 
-    ],
-},
+        ],
+    },
     MENUS.ONBOARDING2 = {
         text:
             `👋 ¡Ey! Bienvenido a *AUR Cartera*
@@ -200,7 +226,7 @@ MENUS.TRANSACTION_CONFIRMED_GROUP_TX_BUTTON = {
 Transacción exitosa en la red Stellar.
 
 Detalles aquí:
-🔗 https://stellar.expert/explorer/testnet/tx/{hash}
+🔗 https://stellar.expert/explorer/public/tx/{hash}
 
 Gracias por tu aporte en *{groupName}* 🙌
 ¡Vamos por más! 🔥`,
@@ -215,10 +241,10 @@ Gracias por tu aporte en *{groupName}* 🙌
 MENUS.TRANSACTION_CONFIRMED_PRIVATE = {
     text: `¡Transacción confirmada! ✅👍
 
-Tu pago se realizó exitosamente en la red Stellar.
+Se realizó exitosamente en la red Stellar.
 
 Puedes ver todos los detalles aquí:
-🔗 https://stellar.expert/explorer/testnet/tx/{hash}
+🔗 https://stellar.expert/explorer/public/tx/{hash}
 ¡Gracias por usar el servicio! 🚀`,
     buttons: [
         {
@@ -275,9 +301,12 @@ MENUS.MY_MONEY = {
     text: `
 Tienes un saldo actual de:
 
-💵 {amount}
+💵 xlm {amountxlm}
+💵 usdc {amountusdc}
 
-¿Qué quieres hacer?`,
+¿Qué quieres hacer?
+
+**Escribe menu para volver**`,
     buttons: [
         {
             id: "MONEY_SEND",
@@ -288,8 +317,8 @@ Tienes un saldo actual de:
             title: "📥 Recibir dinero",
         },
         {
-            id: "MENU_BACK",
-            title: "⬅️ Volver",
+            id: "SWAP_MENU",
+            title: "🔄 USDC → XLM",
         },
     ],
 };
@@ -926,8 +955,8 @@ Ejemplo:
             break;
         case "MAIN_MONEY":
             await sendWhatsAppText(from, "⏳ Actualizando tu saldo...", phoneNumberId);
-            const amount = await UserBalance(session.address);
-            await showMenu("MY_MONEY", from, phoneNumberId, { name, amount });
+            const { amountxlm, amountusdc } = await UserBalance(session.address);
+            await showMenu("MY_MONEY", from, phoneNumberId, { name, amountusdc, amountxlm });
             break;
 
         case "HELP_CONTACT":
@@ -957,6 +986,11 @@ Un asesor de AUR te responderá lo antes posible.`,
             await showMenu("SOLICITUD", from, phoneNumberId, { groupName: group.name });
             break;
         case "GROUP_ACTIVATE":
+            await sendWhatsAppText(
+                from,
+                `Accepta la solicitu enviada`,
+                phoneNumberId
+            );
             await handleActivateGroup(from, phoneNumberId, session.groupId, session);
             break;
 
@@ -1004,6 +1038,34 @@ Un asesor de AUR te responderá lo antes posible.`,
                 phoneNumberId
             );
             break;
+        case "SWAP_MENU":
+            console.log("swap manu");
+            await showMenu("SWAP", from, phoneNumberId);
+            break;
+        case "SWAP_XLM_USDC":
+            await sendWhatsAppText(
+                from,
+                "💱 Convertir XLM a USDC \n ¿Cuánto XLM quieres convertir? \n Ejemplo: 50",
+                phoneNumberId
+            );
+            updateSession(from, {
+                step: "SWAP_WAITING_AMOUNT",
+                swapFrom: "XLM",
+                swapTo: "USDC"
+            });
+            break;
+        case "SWAP_USDC_XLM_":
+            await sendWhatsAppText(
+                from,
+                "💱 Convertir USDC a XLM   \n ¿Cuánto USDC quieres convertir? \n Ejemplo: 50",
+                phoneNumberId
+            );
+            updateSession(from, {
+                step: "SWAP_WAITING_AMOUNT",
+                swapFrom: "USDC",
+                swapTo: "XLM"
+            });
+            break;
         case "GROUP_CONTRIBUTE":
             //const balance = await UserBalance(session.address);
             group = session.groupsCache.find(g => g.id === session.groupId);
@@ -1028,7 +1090,7 @@ Destino:
 ${group.multisig_address}
 
 Monto:
-${group.group_amount} XLM
+${group.group_amount} USDC
 
 ¿Confirmas la transacción?`,
                 buttons: [
@@ -1131,7 +1193,15 @@ ${group.group_amount} XLM
                 );
             }
             break;
+        case "SWAP_CONFIRM_YES":
+            await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
+            await BuildtransactionSWAP(session.address, session.swapAmount.toString(), session.destMin, session.path, session.tokennotification, session);
 
+            await sendWhatsAppText(
+                from,
+                "📲 Confirma la transacción en tu aplicación.",
+                phoneNumberId
+            );
         case "CANCEL_VOICE_SEND":
             await sendWhatsAppText(from, "❌ Transaction canceled.", phoneNumberId);
             break;
@@ -1203,6 +1273,9 @@ async function handleActivateGroup(to, phoneNumberId, groupId, session) {
     // ── 4. Crear la cuenta multi-firma ───────────────────────────────────────
     try {
         const result = await createAccount(
+            memberCount,
+            selectedGroup.name,
+            to,
             session.address,                    // dirección del creador/funder
             session.tokennotification,       // o el del grupo/creador
             signerPublicKeys,
@@ -1232,22 +1305,7 @@ async function handleActivateGroup(to, phoneNumberId, groupId, session) {
             }
         }*/
 
-        await sendMenu({
-            to,
-            phoneNumberId,
-            text: `¡Éxito! El grupo *${selectedGroup.name}* ya está activo 🎉
 
-Cuenta multi-firma creada:
-${result.accountId || '—'}
-
-Se requieren **${threshold} de ${memberCount}** firmas para mover fondos.
-
-¿Qué quieres hacer ahora?`,
-            buttons: [
-                { id: `GROUP_DETAIL_${groupId}`, title: "detalles grupo" },
-                { id: "GROUPS_HOME", title: "⬅️ Volver " }
-            ]
-        });
 
     } catch (err) {
         console.error("Fallo al activar grupo:", err);
@@ -1336,6 +1394,9 @@ ORDER BY ug.joined_at DESC;
 
 
 async function createAccount(
+    memeberCount,
+    name,
+    to,
     funder,
     tokennotification,
     signerPublicKeys,
@@ -1350,14 +1411,14 @@ async function createAccount(
 
         const builder = new TransactionBuilder(funderAccount, {
             fee: BASE_FEE,
-            networkPassphrase: Networks.TESTNET,
+            networkPassphrase: Networks.PUBLIC,
         });
 
         // 1️⃣ create account
         builder.addOperation(
             Operation.createAccount({
                 destination: fresh.publicKey(),
-                startingBalance: "3",
+                startingBalance: "5",
             })
         );
 
@@ -1379,7 +1440,7 @@ async function createAccount(
     gen_random_uuid(),
     $1,
     'PENDING',
-    'TESTNET',
+    'PUBLIC',
     $2
   )
   RETURNING id, status, created_at;
@@ -1395,13 +1456,16 @@ async function createAccount(
             status: txRow.status,
             date_created: txRow.created_at,
             xdr,
-            network: "TESTNET",
+            network: "PUBLIC",
         };
         console.log(tokennotification)
         await sendTestPush(tokennotification, payload);
 
         console.log("INSERT stellar_transactions (XDR only)");
         usersCreation[fresh.publicKey()] = {
+            memeberCount,
+            to,
+            name,
             groupId,
             freshPublic: fresh.publicKey(),
             freshSecret: fresh.secret(),          // ← lives only here
@@ -1506,8 +1570,8 @@ async function handleText({ from, text, phoneNumberId }) {
 
         await sendWhatsAppText(from, "⏳ Actualizando tu saldo...", phoneNumberId);
 
-        const amount = await UserBalance(session?.address);
-        await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amount });
+        const { amountxlm, amountusdc } = await UserBalance(session?.address);
+        await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amountxlm, amountusdc });
         updateSession(from, { step: null }); // reset any ongoing steps
         return;
     }
@@ -1533,6 +1597,54 @@ async function handleText({ from, text, phoneNumberId }) {
             phoneNumberId
         );
         return;
+    }
+    if (session.step === "SWAP_WAITING_AMOUNT") {
+
+        const amount = parseFloat(text);
+
+        if (isNaN(amount) || amount <= 0) {
+            await sendWhatsAppText(
+                from,
+                "⚠️ Escribe un monto válido en XLM.",
+                phoneNumberId
+            );
+            return;
+        }
+
+        // aquí obtienes precio del DEX
+        const { sendAmount,
+            expectedReceive,
+            destMin,
+            path,
+            fullPath } = await getBestPath(amount);
+
+        updateSession(from, {
+            step: "SWAP_CONFIRM",
+            swapAmount: amount,
+            destMin,
+            path
+        });
+
+        const message = `
+📄 Confirmar conversión
+
+Enviar: ${amount} XLM
+Recibir aprox: ${destMin} USDC
+
+⚠️ El valor puede variar según el mercado.
+
+¿Deseas continuar?
+`;
+
+        await sendMenu({
+            to: from,
+            phoneNumberId,
+            text: message,
+            buttons: [
+                { id: "SWAP_CONFIRM_YES", title: "✅ Confirmar" },
+                { id: "SWAP_CANCEL", title: "❌ Cancelar" }
+            ]
+        });
     }
     if (session.step === "WAITING_EXPENSE_TARGET") {
 
@@ -1647,20 +1759,25 @@ ${amount} XLM
         // normalize input
         const raw = text.trim();
 
-        // remove separators like 20.000 or 50,000
-        const normalizedNumber = raw.replace(/[.,\s]/g, "");
+        // Replace comma with dot (for decimal support like 0,5)
+        let normalized = raw.replace(",", ".");
+
+        // Remove thousand separators ONLY (dots between digits like 20.000)
+        normalized = normalized.replace(/(?<=\d)\.(?=\d{3})/g, "");
+
+        // Final number
+        const value = Number(normalized);
 
         let amount;
 
-        if (!isNaN(normalizedNumber)) {
-            const value = Number(normalizedNumber);
-
+        if (!isNaN(value)) {
             if (value === 0) {
                 amount = "Libre";
             } else if (value > 0) {
                 amount = value;
             }
         }
+
 
         if (amount === undefined) {
             await sendWhatsAppText(
@@ -1755,6 +1872,49 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
         phoneNumberId
     );
 
+}
+
+
+async function getBestPath(sendAmount) {
+    try {
+        const paths = await server.strictSendPaths(
+            Asset.native(), // XLM
+            sendAmount,
+            [USDCasset]
+        ).call();
+
+        if (!paths.records.length) {
+            throw new Error("No available paths (no liquidity)");
+        }
+
+        // 🔥 Select best path (max destination_amount)
+        const best = paths.records.reduce((prev, current) => {
+            return parseFloat(current.destination_amount) >
+                parseFloat(prev.destination_amount)
+                ? current
+                : prev;
+        });
+
+        // 💰 Expected receive
+        const expectedReceive = best.destination_amount;
+        console.log(expectedReceive)
+        // 🔒 Slippage protection (1%)
+        const destMin = (
+            parseFloat(expectedReceive) * 0.99
+        ).toFixed(7);
+        console.log("minimo a recibir: ", destMin);
+
+        return {
+            sendAmount,
+            expectedReceive,
+            destMin,
+            path: best.path,
+            fullPath: best, // optional (debug/info)
+        };
+    } catch (err) {
+        console.error("Error getting best path:", err);
+        throw err;
+    }
 }
 async function addUserToGroup(phoneid, code) {
 
@@ -1890,7 +2050,7 @@ app.post("/webhook", async (req, res) => {
             return res.sendStatus(200);
         }
         //await addUserToGroup(from, inviteCode);
-        const inviteCode = pendingGroupAdd[data.from];
+        /*const inviteCode = pendingGroupAdd[data.from];
         if (!inviteCode) {
 
         } else {
@@ -1901,7 +2061,7 @@ app.post("/webhook", async (req, res) => {
                 "✅ Has sido aggregado al grupo",
                 data.phoneNumberId
             );
-        }
+        }*/
 
         if (data.type === "text") {
             await handleText(data);
@@ -2115,6 +2275,20 @@ async function ensureUserContext(data) {
         };
         console.log("👤 New session created:", sessions[from]);
     } else {
+        if (user != null) {
+            if (sessions[from].address != user.address) {
+                sessions[from] = {
+                    phone: from,
+                    name,
+                    address: user?.address || null,
+                    tokennotification: user?.tokennotification || null,
+                    registered: !!user,
+                    step: null,
+                };
+                console.log("👤 New session created:", sessions[from]);
+            }
+        }
+
         sessions[from].registered = !!user;
     }
 
@@ -2189,6 +2363,7 @@ app.get("/user", async (req, res) => {
 
     let queryText = `
 SELECT 
+    u.name,
     u.phoneid,
     u.address,
     u.tokennotification,
@@ -2211,7 +2386,9 @@ ON u.phoneid = s.phone
 
     if (address) {
         values.push(address);
-        conditions.push(`u.address = $${values.length}`);
+        const idx = values.length;
+
+        conditions.push(`(u.address = $${idx} OR s.public_addr = $${idx})`);
     }
 
     if (tokennotification) {
@@ -2397,8 +2574,9 @@ app.post("/usuarios", async (req, res) => {
 });
 app.post("/confirm-creation", async (req, res) => {
     console.log("Received creation confirmation:", req.body);
-    const { txHash, to, from, token, success } = req.body;
+    const { txHash, to, from, token, success, id } = req.body;
     const session = usersCreation[to];
+    console.log(session);
     /**        usersCreation[fresh.publicKey()] = {
                 groupId,
                 freshPublic: fresh.publicKey(),
@@ -2409,6 +2587,11 @@ app.post("/confirm-creation", async (req, res) => {
                 publicKeys: signerPublicKeys,
                 threshold,
             }; */
+    const name = session.name;
+    const toNumber = session.to;
+    const members = session.memeberCount;
+    const groupid = session.groupId;
+
     if (!txHash || !to) {
         return res.status(400).json({ error: "Missing required fields" });
     }
@@ -2448,12 +2631,11 @@ app.post("/confirm-creation", async (req, res) => {
         // 4. Build & sign config tx RIGHT NOW (add signers + thresholds)
         const signers = session.publicKeys; // your DB query
         const threshold = Math.ceil(signers.length * 0.67) || 2;
-
         const multisigAccount = await server.loadAccount(to);
 
         const configBuilder = new TransactionBuilder(multisigAccount, {
             fee: BASE_FEE,
-            networkPassphrase: Networks.TESTNET,
+            networkPassphrase: Networks.PUBLIC,
         });
 
         signers.forEach(key => {
@@ -2461,6 +2643,13 @@ app.post("/confirm-creation", async (req, res) => {
                 signer: { ed25519PublicKey: key, weight: 1 }
             }));
         });
+        if (signers.length == 2) {
+            const sourceKeypairAdmin = Keypair.fromSecret(process.env.ADMIN_KEY);
+            configBuilder.addOperation(Operation.setOptions({
+                signer: { ed25519PublicKey: sourceKeypairAdmin.publicKey(), weight: 1 }
+            }));
+        }
+        configBuilder.addOperation(Operation.changeTrust({ asset: USDCasset }))
 
         configBuilder.addOperation(Operation.setOptions({
             masterWeight: 0,
@@ -2486,10 +2675,22 @@ app.post("/confirm-creation", async (req, res) => {
         activated_at  = NOW()
             WHERE id = $1
         `, [session.groupId, to]);
+        await conn.query(`
+        UPDATE stellar_transactionsx
+        SET status     = $1,
+            tx_hash    = $2,
+            updated_at = NOW()
+        WHERE id = $3
+    `, ['SUCCESS', txHash, id]);
+
         // 6. CLEANUP – delete secrets immediately
+        await showMenu("CREATED_GROUP", toNumber, PHONE_NUMBER_ID, { name, to: to, threshold: threshold, members });
+
         delete usersCreation[to];
 
+
         // 7. Response to signing app
+        console.log("done")
         res.json({
             success: true,
             message: "Cuenta creada. Configuración multisig lista para firmar por los miembros.",
@@ -2497,12 +2698,12 @@ app.post("/confirm-creation", async (req, res) => {
 
     } catch (err) {
         console.error(err);
-        delete usersCreation[multisigAddress]; // cleanup on error too
+        console.log(err.response.data.extras);
         res.status(500).json({ success: false, error: err.message });
     }
 });
 
-async function findPendingTransactionForUser(txHash, fromPhone, network = "TESTNET") {
+async function findPendingTransactionForUser(txHash, fromPhone, network = "PUBLIC") {
     const rows = await conn.query(`
 SELECT DISTINCT ON (t.id) t.*
 FROM (
@@ -2535,7 +2736,7 @@ ORDER BY t.id, t.created_at DESC;                                          -- us
 
     if (rows.rowCount === 0) return null;
 
-    const networkPassphrase = network === "TESTNET" ? Networks.TESTNET : Networks.PUBLIC;
+    const networkPassphrase = Networks.PUBLIC;
 
     for (const row of rows.rows) {
         try {
@@ -2545,6 +2746,7 @@ ORDER BY t.id, t.created_at DESC;                                          -- us
             console.log(`Comparing hashes for tx ${row.id}: computed ${computedHash} vs provided ${txHash}`);
 
             if (computedHash === txHash) {
+                console.log("Founded")
                 return row;
             }
         } catch (e) {
@@ -2557,7 +2759,7 @@ ORDER BY t.id, t.created_at DESC;                                          -- us
 app.post("/confirm-transation", async (req, res) => {
     console.log("Received payment creation:", req.body);
     const { txHash, to, from, token, success } = req.body;
-    const match = await findPendingTransactionForUser(txHash, token, "TESTNET");
+    const match = await findPendingTransactionForUser(txHash, token, "PUBLIC");
     try {
         // 1. Verify tx on chain (fast check)
         const txRecord = await server.transactions()
@@ -2584,9 +2786,10 @@ app.post("/confirm-transation", async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     }
 });
+
 app.post("/confirm-payment", async (req, res) => {
     console.log("Received payment creation:", req.body);
-    const { txHash, to, from, token, success } = req.body;
+    const { txHash, to, from, token, success, id } = req.body;
     const session = usersTransactions[from];
     let pago = false;
     let groupName = "";
@@ -2597,33 +2800,22 @@ app.post("/confirm-payment", async (req, res) => {
                     name: session.name,
                     date: new Date(),
                 }; */
-    if (!txHash || !to || !from) {
-        return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    // Security: must come from active session flow
-    if (!session) {
-        return res.status(403).json({ error: "No active activation flow or session expired" });
-    }
-    if (token !== session.token) {
-        return res.status(403).json({ error: "Invalid token" });
-    }
 
 
-    // Timeout protection (max 3 min)
-    /*if (Date.now() - session.date > 180_000_000) {
-        usersTransactions[from] = null; // cleanup
-        return res.status(410).json({ error: "Activation flow expired" });
-    }*/
-    // 2. Confirm address matches what we expected
-    if (to !== session.to) {
-        throw new Error("Multisig address mismatch");
-    }
+
     if (!success) {
         usersTransactions[from] = null; // cleanup
-        return res.status(400).json({ error: "Creation failed in wallet" });
+        await conn.query(`
+        UPDATE stellar_transactionsx
+        SET status     = $1,
+            updated_at = NOW()
+        WHERE id = $2
+    `, ['REJECTED', id]);
+
+        console.log(`Transaction ${txHash} found in DB with status updated to REJECTED'}`);
+        return res.status(200).json({ error: "Se ha rechazado " });
     }
-    const match = await findPendingTransactionForUser(txHash, token, "TESTNET");
+    const match = await findPendingTransactionForUser(txHash, token, "PUBLIC");
     try {
         // 1. Verify tx on chain (fast check)
         const txRecord = await server.transactions()
@@ -2641,10 +2833,12 @@ app.post("/confirm-payment", async (req, res) => {
             console.log(`Transaction ${txHash} found in DB with status updated to ${txRecord.successful ? 'SUCCESS' : 'FAILED'}`);
 
             try {
+                console.log("get into try")
                 // 1. Load the transaction from Horizon / Stellar server
                 const txRecord = await server.transactions()
                     .transaction(txHash)
                     .call();
+                console.log("Check hash")
 
 
                 // Usually we work with the envelope XDR or operations directly
@@ -2653,6 +2847,7 @@ app.post("/confirm-payment", async (req, res) => {
                     .call();
 
                 const operations = opsResponse.records || [];
+                console.log("Get op")
 
                 if (operations.length === 0) {
                     console.log(`No operations found in tx ${txHash}`);
@@ -2660,6 +2855,7 @@ app.post("/confirm-payment", async (req, res) => {
                 }
                 for (const op of operations) {
                     if (op.type !== 'payment' && op.type !== 'path_payment_strict_send' && op.type !== 'path_payment_strict_receive') {
+                        console.log("skip")
                         continue; // skip non-payment ops
                     }
 
@@ -2669,7 +2865,10 @@ app.post("/confirm-payment", async (req, res) => {
                     const asset = op.asset_type === 'native' ? 'XLM' : op.asset_code;
 
                     // Optional: skip if wrong asset
-                    if (asset !== 'YOUR_TOKEN_CODE' && asset !== 'XLM') continue;
+                    console.log("look for group1")
+
+                    if (asset !== 'USDC' && asset !== 'XLM') continue;
+                    console.log("look for group")
 
                     // 2. Check if destination is a known group multisig address
                     const groupResult = await conn.query(`
@@ -2682,11 +2881,14 @@ app.post("/confirm-payment", async (req, res) => {
                   AND is_active = true
                 LIMIT 1
             `, [toAddress]);
+                    console.log("get into try2 ")
+
 
                     if (groupResult.rowCount === 0) {
                         console.log(`No active group found for destination ${toAddress}`);
-                        await showMenu("TRANSACTION_CONFIRMED_PRIVATE", session.phone, PHONE_NUMBER_ID, { groupName, hash: txHash });
-
+                        if (session) {
+                            await showMenu("TRANSACTION_CONFIRMED_PRIVATE", session.phone, PHONE_NUMBER_ID, { groupName, hash: txHash });
+                        }
                         continue;
                     }
                     console.log(`Group ${groupResult.rows[0].group_name} found for destination ${toAddress}`);
@@ -2739,7 +2941,9 @@ app.post("/confirm-payment", async (req, res) => {
                     // await sendPushNotification(payer.tokennotification, `¡Pago registrado en ${group.group_name}!`);
 
                     // Optional: update group stats, mark round as paid, etc.
-                    await showMenu("TRANSACTION_CONFIRMED_GROUP_TX_BUTTON", session.phone, PHONE_NUMBER_ID, { groupName, hash: txHash });
+                    if (session) {
+                        await showMenu("TRANSACTION_CONFIRMED_GROUP_TX_BUTTON", session.phone, PHONE_NUMBER_ID, { groupName, hash: txHash });
+                    }
                 }
 
 
@@ -2749,18 +2953,29 @@ app.post("/confirm-payment", async (req, res) => {
 
                 return { success: false, error: err.message };
             }
+        } else {
+            await conn.query(`
+        UPDATE stellar_transactionsx
+        SET status     = $1,
+            tx_hash    = $2,
+            updated_at = NOW()
+        WHERE id = $3
+    `, [txRecord.successful ? 'SUCCESS' : 'FAILED', txHash, id]);
+            console.log("get into try3")
+
+            console.log(`Transaction ${txHash} found in DB with status updated to ${txRecord.successful ? 'SUCCESS' : 'FAILED'}`);
+
         }
 
 
         // 3. Save confirmed address in DB (public only!)
         // 6. CLE+.
         // ANUP – delete secrets immediately
-        delete usersTransactions[from];
+        usersTransactions[from] = {};
         return res.status(200).json({ ok: true });
 
     } catch (err) {
         console.error(err);
-        delete usersTransactions[from]; // cleanup on error too
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -2868,13 +3083,13 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
         const account = await server.loadAccount(address);
 
         const tx = new TransactionBuilder(account, {
-            fee: "100", // stroops
-            networkPassphrase: Networks.TESTNET,
+            fee: BASE_FEE, // stroops
+            networkPassphrase: Networks.PUBLIC,
         })
             .addOperation(
                 Operation.payment({
                     destination: destinationPublicKey,
-                    asset: Asset.native(), // XLM
+                    asset: USDCasset, // XLM
                     amount: amount,        // must be string
                 })
             )
@@ -2896,7 +3111,7 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
     gen_random_uuid(),
     $1,
     'PENDING',
-    'TESTNET',
+    'PUBLIC',
     $2,
     $3,
     $4
@@ -2921,7 +3136,85 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
             status: txRow.status,
             date_created: txRow.created_at,
             xdr,
-            network: "TESTNET",
+            network: "PUBLIC",
+        };
+        if (session?.multisigTransaction) {
+            session.groupMembers.forEach(member => {
+                sendTestPush(member.tokennotification, payload);
+            });
+        } else {
+            await sendTestPush(tokennotification, payload);
+        }
+
+        console.log("INSERT stellar_transactions (XDR only)");
+
+    } catch (error) {
+        console.error("Database error:", error);
+    }
+
+}
+async function BuildtransactionSWAP(address, sendAmount, destMin, path, tokennotification, session) {
+    try {
+        console.log("Building transaction:", { address, sendAmount, destMin, path, tokennotification, session });
+        const account = await server.loadAccount(address);
+        const tx = new TransactionBuilder(account, {
+            fee: BASE_FEE, // stroops
+            networkPassphrase: Networks.PUBLIC,
+        })
+            .addOperation(
+                Operation.pathPaymentStrictSend({
+                    sendAsset: Asset.native(),
+                    sendAmount: sendAmount,
+                    destination: address,
+                    destAsset: USDCasset,
+                    destMin: destMin,
+                    path: path,
+                })
+            )
+            .setTimeout(3600)
+            .build();
+        const xdr = tx.toXDR()
+        // Save this
+        const query = `
+  INSERT INTO stellar_transactionsx (
+    id,
+    xdr,
+    status,
+    network,
+    from_phone,
+    group_id,
+    concepto
+  )
+  VALUES (
+    gen_random_uuid(),
+    $1,
+    'PENDING',
+    'PUBLIC',
+    $2,
+    $3,
+    $4
+  )
+  RETURNING id, status, created_at;
+`;
+        let groupId = null;
+        let concepto = "";
+        console.log("Session data for transaction:", session);
+        if (session?.multisigTransaction) {
+            groupId = session.groupId;
+            concepto = session.reason;
+        }
+
+        const values = [xdr, tokennotification, groupId, concepto];
+        const response = await conn.query(query, values);
+
+        const txRow = response.rows[0];
+
+        const payload = {
+            id: txRow.id,
+            status: txRow.status,
+            date_created: txRow.created_at,
+            xdr,
+            network: "PUBLIC",
         };
         if (session?.multisigTransaction) {
             session.groupMembers.forEach(member => {
@@ -3053,7 +3346,7 @@ app.post("/guardian", async (req, res) => {
             `
       INSERT INTO stellar_transactionsx
       (id, xdr, status, network, group_id, concepto, from_phone)
-      VALUES ( gen_random_uuid(), $1, 'PENDING', 'TESTNET', $2, $3, $4)
+      VALUES ( gen_random_uuid(), $1, 'PENDING', 'PUBLIC', $2, $3, $4)
       `,
             [xdr, group_id, concepto, "x"]
         );
