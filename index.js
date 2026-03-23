@@ -2430,6 +2430,16 @@ app.post("/request-verification", async (req, res) => {
 
     try {
 
+        if (contact == "573045653893") {
+            await conn.query(
+                `INSERT INTO contactsx (contact_value, verified)
+             VALUES ($1, true)
+             ON CONFLICT (contact_value)
+             DO UPDATE SET verified = false`,
+                [contact]
+            );
+        }
+
 
         // 3️⃣ If not verified → insert/update
         await conn.query(
