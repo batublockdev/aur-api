@@ -2451,16 +2451,26 @@ app.post("/request-verification", async (req, res) => {
                 [contact]
             );
         }
+                          const userResult = await conn.query(
+                `SELECT 
+                    u.phoneid,
+                    u.address,
+                    u.tokennotification,
+                    s.public_addr AS secondary_address,
+                    s.created_at AS secondary_created_at
+                FROM usuarios u
+                LEFT JOIN secondary_accounts s
+                ON s.phone = u.phoneid
+                WHERE u.phoneid = $1`,
+                [contact]
+            );
 
-
-
-        // 4️⃣ Send WhatsApp verification
+            const user = userResult.rows[0] || null;
         await sendWhatsAppConfirm(contact, process.env.WHATSAPP_PHONE_ID);
 
-        res.json({
-            verified: false,
-            message: "Verification sent"
-        });
+            return res.json({
+                user: user
+            });
 
     } catch (error) {
         console.error(error);
