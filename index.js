@@ -1535,6 +1535,7 @@ async function createGroup({
         paymentIntervalDays,
         inviteCode
     });
+
     const query = `
         INSERT INTO groups (
             name,
@@ -3103,6 +3104,8 @@ function normalizeStellarAddress(input) {
 }
 async function Buildtransaction(address, destinationPublicKey, amount, tokennotification, session) {
     try {
+            const user = await getUser(session.phone);
+
         console.log("Building transaction:", { address, destinationPublicKey, amount });
         const account = await server.loadAccount(address);
 
@@ -3150,7 +3153,7 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
             concepto = session.reason;
         }
 
-        const values = [xdr, tokennotification, groupId, concepto];
+        const values = [xdr, user.tokennotification, groupId, concepto];
         const response = await conn.query(query, values);
 
         const txRow = response.rows[0];
@@ -3167,7 +3170,7 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
                 sendTestPush(member.tokennotification, payload);
             });
         } else {
-            await sendTestPush(tokennotification, payload);
+            await sendTestPush(user.tokennotification, payload);
         }
 
         console.log("INSERT stellar_transactions (XDR only)");
@@ -3178,7 +3181,8 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
 
 }
 async function BuildtransactionSWAP(address, sendAmount, destMin, path, tokennotification, session) {
-    try {
+    try {            const user = await getUser(session.phone);
+
         console.log("Building transaction:", { address, sendAmount, destMin, path, tokennotification, session });
         const account = await server.loadAccount(address);
         const tx = new TransactionBuilder(account, {
@@ -3228,7 +3232,7 @@ async function BuildtransactionSWAP(address, sendAmount, destMin, path, tokennot
             concepto = session.reason;
         }
 
-        const values = [xdr, tokennotification, groupId, concepto];
+        const values = [xdr, user.tokennotification, groupId, concepto];
         const response = await conn.query(query, values);
 
         const txRow = response.rows[0];
@@ -3245,7 +3249,7 @@ async function BuildtransactionSWAP(address, sendAmount, destMin, path, tokennot
                 sendTestPush(member.tokennotification, payload);
             });
         } else {
-            await sendTestPush(tokennotification, payload);
+            await sendTestPush(user.tokennotification, payload);
         }
 
         console.log("INSERT stellar_transactions (XDR only)");
