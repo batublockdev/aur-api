@@ -3099,7 +3099,10 @@ function normalizeStellarAddress(input) {
 }
 async function Buildtransaction(address, destinationPublicKey, amount, session) {
     try {
+
         const user = await getUser(session.phone);
+        console.log("Session", session);
+        console.log("user", user);
 
         console.log("Building transaction:", { address, destinationPublicKey, amount });
         const account = await server.loadAccount(address);
