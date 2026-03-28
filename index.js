@@ -3064,7 +3064,7 @@ FROM (
 ORDER BY t.id, t.created_at DESC;
         `;
 
-        const result = await conn.query(query, [token]);
+        const result = await conn.query(query, [pubkey]);
 
         res.json({
             success: true,
