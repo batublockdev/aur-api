@@ -1280,7 +1280,8 @@ async function handleActivateGroup(to, phoneNumberId, groupId, session) {
             session.tokennotification,       // o el del grupo/creador
             signerPublicKeys,
             threshold,
-            groupId
+            groupId,
+            session.phone
         );
 
         // Ejemplo de lo que podría devolver tu función:
@@ -1401,11 +1402,14 @@ async function createAccount(
     tokennotification,
     signerPublicKeys,
     threshold,
-    groupId
+    groupId,
+    phone
 
 ) {
     try {
         console.log("Creating multi-sig account with funder:", funder);
+        const user = await getUser(phone);
+
         const fresh = Keypair.random();
         const funderAccount = await server.loadAccount(funder);
 
@@ -1434,20 +1438,22 @@ async function createAccount(
     xdr,
     status,
     network,
-    from_phone
+    from_phone,
+    pubkey
   )
   VALUES (
     gen_random_uuid(),
     $1,
     'PENDING',
     'PUBLIC',
-    $2
+    $2,
+    $3
   )
   RETURNING id, status, created_at;
 `;
 
 
-        const values = [xdr, tokennotification];
+        const values = [xdr, user.tokennotification, user.address];
         const response = await conn.query(query, values);
         const txRow = response.rows[0];
 
@@ -1458,8 +1464,11 @@ async function createAccount(
             xdr,
             network: "PUBLIC",
         };
-        console.log(tokennotification)
-        await sendTestPush(tokennotification, payload);
+        console.log(user.tokennotification)
+        if (user.tokennotification != "x") {
+            await sendTestPush(tokennotification, payload);
+
+        }
 
         console.log("INSERT stellar_transactions (XDR only)");
         usersCreation[fresh.publicKey()] = {
@@ -2276,20 +2285,6 @@ async function ensureUserContext(data) {
         };
         console.log("👤 New session created:", sessions[from]);
     } else {
-        if (user != null) {
-            if (sessions[from].address != user.address) {
-                sessions[from] = {
-                    phone: from,
-                    name,
-                    address: user?.address || null,
-                    tokennotification: user?.tokennotification || null,
-                    registered: !!user,
-                    step: null,
-                };
-                console.log("👤 New session created:", sessions[from]);
-            }
-        }
-
         sessions[from].registered = !!user;
     }
 
@@ -2452,8 +2447,8 @@ app.post("/request-verification", async (req, res) => {
                 [contact]
             );
         }
-                          const userResult = await conn.query(
-                `SELECT 
+        const userResult = await conn.query(
+            `SELECT 
                     u.phoneid,
                     u.address,
                     u.tokennotification,
@@ -2463,15 +2458,15 @@ app.post("/request-verification", async (req, res) => {
                 LEFT JOIN secondary_accounts s
                 ON s.phone = u.phoneid
                 WHERE u.phoneid = $1`,
-                [contact]
-            );
+            [contact]
+        );
 
-            const user = userResult.rows[0] || null;
+        const user = userResult.rows[0] || null;
         await sendWhatsAppConfirm(contact, process.env.WHATSAPP_PHONE_ID);
 
-            return res.json({
-                user: user
-            });
+        return res.json({
+            user: user
+        });
 
     } catch (error) {
         console.error(error);
@@ -2735,7 +2730,7 @@ FROM (
     -- transactions created by the user
     SELECT *
     FROM stellar_transactionsx
-    WHERE  status = 'PENDING' AND from_phone = $1
+    WHERE  status = 'PENDING' AND pubkey = $1
 
     UNION ALL
 
@@ -2744,7 +2739,7 @@ FROM (
     FROM stellar_transactionsx t
     JOIN user_groups ug ON ug.group_id = t.group_id
     JOIN usuarios u ON u.phoneid = ug.user_phoneid
-    WHERE u.tokennotification = $1
+    WHERE u.address = $1
 
     UNION ALL
 
@@ -2753,7 +2748,7 @@ FROM (
     FROM stellar_transactionsx t
     JOIN recuperation_accountx ra ON ra.group_id = t.group_id
     JOIN usuarios u ON u.phoneid = ra.user_phoneid
-    WHERE u.tokennotification = $1
+    WHERE u.address = $1
 
 ) t
 ORDER BY t.id, t.created_at DESC;                                          -- usually 1 or 0 rows
@@ -2784,7 +2779,7 @@ ORDER BY t.id, t.created_at DESC;                                          -- us
 app.post("/confirm-transation", async (req, res) => {
     console.log("Received payment creation:", req.body);
     const { txHash, to, from, token, success } = req.body;
-    const match = await findPendingTransactionForUser(txHash, token, "PUBLIC");
+    const match = await findPendingTransactionForUser(txHash, from, "PUBLIC");
     try {
         // 1. Verify tx on chain (fast check)
         const txRecord = await server.transactions()
@@ -2840,7 +2835,7 @@ app.post("/confirm-payment", async (req, res) => {
         console.log(`Transaction ${txHash} found in DB with status updated to REJECTED'}`);
         return res.status(200).json({ error: "Se ha rechazado " });
     }
-    const match = await findPendingTransactionForUser(txHash, token, "PUBLIC");
+    const match = await findPendingTransactionForUser(txHash, from, "PUBLIC");
     try {
         // 1. Verify tx on chain (fast check)
         const txRecord = await server.transactions()
@@ -3036,8 +3031,8 @@ async function generatePaymentNumber(conn, userPhoneId) {
 app.get("/transactions/:token", async (req, res) => {
     try {
 
-        const { token } = req.params;
-        console.log(`Fetching transactions for token: ${token}`);
+        const { pubkey } = req.params;
+        console.log(`Fetching transactions for token: ${pubkey}`);
 
         const query = `
 SELECT DISTINCT ON (t.id) t.*
@@ -3045,7 +3040,7 @@ FROM (
     -- transactions created by the user
     SELECT *
     FROM stellar_transactionsx
-    WHERE from_phone = $1
+    WHERE pubkey = $1
 
     UNION ALL
 
@@ -3054,7 +3049,7 @@ FROM (
     FROM stellar_transactionsx t
     JOIN user_groups ug ON ug.group_id = t.group_id
     JOIN usuarios u ON u.phoneid = ug.user_phoneid
-    WHERE u.tokennotification = $1
+    WHERE u.address = $1
 
     UNION ALL
 
@@ -3063,7 +3058,7 @@ FROM (
     FROM stellar_transactionsx t
     JOIN recuperation_accountx ra ON ra.group_id = t.group_id
     JOIN usuarios u ON u.phoneid = ra.user_phoneid
-    WHERE u.tokennotification = $1
+    WHERE u.address = $1
 
 ) t
 ORDER BY t.id, t.created_at DESC;
@@ -3102,9 +3097,9 @@ function normalizeStellarAddress(input) {
 
     return cleaned;
 }
-async function Buildtransaction(address, destinationPublicKey, amount, tokennotification, session) {
+async function Buildtransaction(address, destinationPublicKey, amount, session) {
     try {
-            const user = await getUser(session.phone);
+        const user = await getUser(session.phone);
 
         console.log("Building transaction:", { address, destinationPublicKey, amount });
         const account = await server.loadAccount(address);
@@ -3132,7 +3127,9 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
     network,
     from_phone,
     group_id,
-    concepto
+    concepto,
+        pubkey
+
   )
   VALUES (
     gen_random_uuid(),
@@ -3141,7 +3138,8 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
     'PUBLIC',
     $2,
     $3,
-    $4
+    $4,
+    $5
   )
   RETURNING id, status, created_at;
 `;
@@ -3153,7 +3151,7 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
             concepto = session.reason;
         }
 
-        const values = [xdr, user.tokennotification, groupId, concepto];
+        const values = [xdr, user.tokennotification, groupId, concepto, user.address];
         const response = await conn.query(query, values);
 
         const txRow = response.rows[0];
@@ -3167,10 +3165,14 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
         };
         if (session?.multisigTransaction) {
             session.groupMembers.forEach(member => {
-                sendTestPush(member.tokennotification, payload);
+                if (member.tokennotification != "x") {
+                    sendTestPush(member.tokennotification, payload);
+                }
             });
         } else {
-            await sendTestPush(user.tokennotification, payload);
+            if (user.tokennotification != "x") {
+                await sendTestPush(user.tokennotification, payload);
+            }
         }
 
         console.log("INSERT stellar_transactions (XDR only)");
@@ -3181,7 +3183,8 @@ async function Buildtransaction(address, destinationPublicKey, amount, tokennoti
 
 }
 async function BuildtransactionSWAP(address, sendAmount, destMin, path, tokennotification, session) {
-    try {            const user = await getUser(session.phone);
+    try {
+        const user = await getUser(session.phone);
 
         console.log("Building transaction:", { address, sendAmount, destMin, path, tokennotification, session });
         const account = await server.loadAccount(address);
@@ -3211,7 +3214,8 @@ async function BuildtransactionSWAP(address, sendAmount, destMin, path, tokennot
     network,
     from_phone,
     group_id,
-    concepto
+    concepto,
+    pubkey
   )
   VALUES (
     gen_random_uuid(),
@@ -3220,19 +3224,16 @@ async function BuildtransactionSWAP(address, sendAmount, destMin, path, tokennot
     'PUBLIC',
     $2,
     $3,
-    $4
+    $4,
+    $5
   )
   RETURNING id, status, created_at;
 `;
         let groupId = null;
         let concepto = "";
         console.log("Session data for transaction:", session);
-        if (session?.multisigTransaction) {
-            groupId = session.groupId;
-            concepto = session.reason;
-        }
 
-        const values = [xdr, user.tokennotification, groupId, concepto];
+        const values = [xdr, user.tokennotification, groupId, concepto, user.address];
         const response = await conn.query(query, values);
 
         const txRow = response.rows[0];
@@ -3244,11 +3245,8 @@ async function BuildtransactionSWAP(address, sendAmount, destMin, path, tokennot
             xdr,
             network: "PUBLIC",
         };
-        if (session?.multisigTransaction) {
-            session.groupMembers.forEach(member => {
-                sendTestPush(member.tokennotification, payload);
-            });
-        } else {
+
+        if (user.tokennotification != "x") {
             await sendTestPush(user.tokennotification, payload);
         }
 
