@@ -3028,11 +3028,11 @@ async function generatePaymentNumber(conn, userPhoneId) {
     return `PAY-${monthPrefix}-${paddedSeq}`;
 }
 
-app.get("/transactions/:token", async (req, res) => {
+app.get("/transactions/:pubkey", async (req, res) => {
     try {
 
         const { pubkey } = req.params;
-        console.log(`Fetching transactions for token: ${pubkey}`);
+        console.log(`Fetching transactions for pubkey: ${pubkey}`);
 
         const query = `
 SELECT DISTINCT ON (t.id) t.*
