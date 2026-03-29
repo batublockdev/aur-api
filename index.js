@@ -1195,7 +1195,7 @@ ${group.group_amount} USDC
             break;
         case "SWAP_CONFIRM_YES":
             await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
-            await BuildtransactionSWAP(session.address, session.swapAmount.toString(), session.destMin, session.path, session.tokennotification, session);
+            await BuildtransactionSWAP(session.address, session.swapAmount.toString(), session.destMin, session.path, session);
 
             await sendWhatsAppText(
                 from,
@@ -3185,11 +3185,11 @@ async function Buildtransaction(address, destinationPublicKey, amount, session) 
     }
 
 }
-async function BuildtransactionSWAP(address, sendAmount, destMin, path, tokennotification, session) {
+async function BuildtransactionSWAP(address, sendAmount, destMin, path, session) {
     try {
         const user = await getUser(session.phone);
 
-        console.log("Building transaction:", { address, sendAmount, destMin, path, tokennotification, session });
+        console.log("Building transaction:", address, sendAmount, destMin, path, session);
         const account = await server.loadAccount(address);
         const tx = new TransactionBuilder(account, {
             fee: BASE_FEE, // stroops
