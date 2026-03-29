@@ -3191,17 +3191,13 @@ async function BuildtransactionSWAP(address, sendAmount, destMin, path, session)
         const user = await getUser(session.phone);
 
         console.log("Building transaction:", address, sendAmount, destMin, path, session);
-        const formattedPath = path.map((p) => {
-            if (p.asset_type === "native") {
+        const pathAssets = path.map(item => {
+            if (item.asset_type === 'native') {
                 return Asset.native();
             }
-
-            if (!p.asset_code || !p.asset_issuer) {
-                throw new Error("Invalid path asset: " + JSON.stringify(p));
-            }
-
-            return new Asset(p.asset_code, p.asset_issuer);
+            return new Asset(item.asset_code, item.asset_issuer);
         });
+        console.log("path ", pathAssets)
         const account = await server.loadAccount(address);
         const tx = new TransactionBuilder(account, {
             fee: BASE_FEE, // stroops
@@ -3214,7 +3210,7 @@ async function BuildtransactionSWAP(address, sendAmount, destMin, path, session)
                     destination: address,
                     destAsset: USDCasset,
                     destMin: destMin,
-                    path: formattedPath,
+                    path: pathAssets,
                 })
             )
             .setTimeout(3600)
