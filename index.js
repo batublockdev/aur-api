@@ -1165,7 +1165,7 @@ ${group.group_amount} USDC
                 };
 
                 await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
-                await Buildtransaction(group.multisig_address, session.to, session.amount.toString(), session.tokennotification, session);
+                await Buildtransaction(group.multisig_address, session.to, session.amount.toString(), session);
                 await sendWhatsAppText(
                     from,
                     "📲 Los miembros deben confirmar la transacción en la aplicación.",
@@ -1184,7 +1184,7 @@ ${group.group_amount} USDC
                 console.log("✅ Confirming voice transaction:", session);
 
                 await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
-                await Buildtransaction(session.address, session.to, session.amount.toString(), session.tokennotification, session);
+                await Buildtransaction(session.address, session.to, session.amount.toString(), session);
 
                 await sendWhatsAppText(
                     from,
