@@ -3315,6 +3315,8 @@ app.post('/api/sign-transaction', async (req, res) => {
 });
 app.post('/delete-user', async (req, res) => {
     try {
+        console.log("Received request to sign transaction. Body keys:", Object.keys(req.body));
+
         const { phone } = req.body;   // expect base64 XDR
         console.log("Eliminar cuenta", phone);
         // Return the now-signed XDR (base64)
