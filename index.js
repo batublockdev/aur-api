@@ -1582,7 +1582,7 @@ async function handleText({ from, text, phoneNumberId }) {
 
         const { amountxlm, amountusdc } = await UserBalance(session?.address);
         await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amountxlm, amountusdc });
-        updateSession(from, { step: null }); // reset any ongoing steps
+        updateSession(from, { step: null, to: null, amount: null, reason: null, multisigTransaction: null }); // reset any ongoing steps
         return;
     }
     if (session?.step === "SEND_WAITING_ADDRESS") {
