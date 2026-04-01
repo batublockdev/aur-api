@@ -3313,7 +3313,20 @@ app.post('/api/sign-transaction', async (req, res) => {
         res.status(400).json({ error: err.message });
     }
 });
+app.post('/delete-user', async (req, res) => {
+    try {
+        const { phone } = req.body;   // expect base64 XDR
+        console.log("Eliminar cuenta", phone);
+        // Return the now-signed XDR (base64)
 
+        res.json({
+            success: true
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(400).json({ error: err.message });
+    }
+});
 async function sendTestPush(expoPushToken, solicitudData) {
     await fetch("https://exp.host/--/api/v2/push/send", {
         method: "POST",
