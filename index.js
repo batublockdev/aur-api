@@ -168,14 +168,18 @@ Se requieren **{threshold} de {members}** firmas para mover fondos.
     },
     MENUS.ONBOARDING2 = {
         text:
-            `👋 ¡Ey! Bienvenido a *AUR Cartera*
+            `👋 ¡Hola!
 
-Aquí guardás tu plata, mandás dinero
-y ahorrás con tu gente 😄
+*AUR* es tu billetera de ahorros grupales.
 
-Fácil y seguro`,
+Con AUR puedes:
+💵 Recibir y enviar dólares
+👥 Ahorrar en grupo (natillera)
+📱 Todo por WhatsApp
+
+¿Qué quieres hacer?`,
         buttons: [
-            { id: "ABOUT_CREATE_ACCOUNT", title: "🆕 Crear mi cuenta" },
+            { id: "ABOUT_CREATE_ACCOUNT", title: "🆕 Crear cuenta" },
             { id: "ONBOARD_ABOUT", title: "❓ Qué es AUR" },
         ],
     },
@@ -899,12 +903,16 @@ Ahorro familia`,
             await sendMenu({
                 to: from,
                 phoneNumberId,
-                text: `📤 Enviar dinero
+                text: `📤 *Enviar dinero*
 
-¿Cómo quieres indicar el envío?`,
+¿A quién quieres enviar?
+
+💡 Escribe la dirección Stellar o responde con el número:
+
+1️⃣ Escribir dirección
+2️⃣ Pegar dirección`,
                 buttons: [
-                    { id: "SEND_VOICE", title: "🎤 Con voz" },
-                    { id: "SEND_TEXT", title: "⌨️ Escribir datos" },
+                    { id: "SEND_TEXT", title: "✍️ Escribir" },
                     { id: "MENU_BACK", title: "⬅️ Volver" },
                 ],
             });
@@ -1119,17 +1127,15 @@ Ejemplo: 10`,
             await sendMenu({
                 to: from,
                 phoneNumberId,
-                text: `📤 Confirmar envío
+                text: `✨ *Confirmar envío*
 
-Destino:
-${group.multisig_address}
+Para: \`${group.multisig_address.substring(0, 20)}...\`
 
-Monto:
-${group.group_amount} USDC
+Monto: ${group.group_amount} USDC 💵
 
-¿Confirmas la transacción?`,
+¿Enviar ahora?`,
                 buttons: [
-                    { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
+                    { id: "CONFIRM_VOICE_SEND", title: "✅ Enviar" },
                     { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
                 ],
             });
@@ -1174,7 +1180,7 @@ ${group.group_amount} USDC
         case "MENU_MY_GROUPS":
             await sendWhatsAppText(
                 from,
-                "👥 Group savings (Natilleras) coming soon 🇨🇴",
+                "👥 *Mis natilleras*\n\nPróximamente podrás ver tus grupos de ahorro aquí 🇨🇴",
                 phoneNumberId
             );
             break;
@@ -1621,7 +1627,7 @@ async function handleText({ from, text, phoneNumberId }) {
 
         const { amountxlm, amountusdc, address } = await UserBalance(session?.address);
         // Enviar explicación de la dirección
-        await sendWhatsAppText(from, `📱 *Tu dirección de wallet*\n\nEsta es tu dirección pública. Otros la usan para enviarte dinero.\n\n📍 *Copiala y pégala donde la necesites:*`, phoneNumberId);
+        await sendWhatsAppText(from, `📱 *Tu dirección para recibir*\n\nDale esta dirección a quien te quiera enviar dinero:\n\n📎 Copia y pega:`, phoneNumberId);
         // Enviar la dirección sola
         await sendWhatsAppText(from, `\`${address}\``, phoneNumberId);
         // Enviar el menú
@@ -1647,7 +1653,14 @@ async function handleText({ from, text, phoneNumberId }) {
 
         await sendWhatsAppText(
             from,
-            `💰 ¿Cuánto deseas enviar?`,
+            `💰 *¿Cuánto quieres enviar?*
+
+Tu saldo disponible:
+💵 USDC: ${session?.amountusdc || '0'}
+⚡ XLM: ${session?.amountxlm || '0'}
+
+💡 Escribe el monto en números:
+Ejemplo: 25`,
             phoneNumberId
         );
         return;
@@ -1794,17 +1807,15 @@ Recibes: ~${destMin} ${session.swapTo} ${toIcon}
         await sendMenu({
             to: from,
             phoneNumberId,
-            text: `📤 Confirmar envío
+            text: `✨ *Confirmar envío*
 
-Destino:
-${session.to}
+Para: \`${session.to.substring(0, 20)}...\`
 
-Monto:
-${amount} XLM
+Monto: ${amount} XLM ⚡
 
-¿Confirmas la transacción?`,
+¿Enviar ahora?`,
             buttons: [
-                { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
+                { id: "CONFIRM_VOICE_SEND", title: "✅ Enviar" },
                 { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
             ],
         });
