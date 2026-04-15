@@ -2269,24 +2269,29 @@ function extractJson(text) {
     return match ? match[0] : null;
 }
 async function ensureUserContext(data) {
-    const { from, name, phoneNumberId } = data;
+       const { from, name } = data;
 
     const user = await getUser(from);
     console.log("🔍 User lookup:", user);
-    // create session if not exists
-    sessions[from].address=user?.address;
+
     if (!sessions[from]) {
         sessions[from] = {
             phone: from,
             name,
-            address: user?.address || null,
-            tokennotification: user?.tokennotification || null,
-            registered: !!user,
+            address: null,
+            tokennotification: null,
+            registered: false,
             step: null,
         };
         console.log("👤 New session created:", sessions[from]);
-    } else {
-        sessions[from].registered = !!user;
+    }
+
+    // ✅ SIEMPRE sincronizar con DB
+    sessions[from].registered = !!user;
+
+    if (user) {
+        sessions[from].address = user.address;
+        sessions[from].tokennotification = user.tokennotification;
     }
 
     return { user, session: sessions[from] };
