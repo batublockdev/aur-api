@@ -195,7 +195,7 @@ Para entrar al grupo primero debes completar tu registro en la app AUR.
 
 Tu código de invitación está guardado 👍`,
     ctaText: " Abrir App AUR",
-    ctaUrl: "https://aur.app.link/open",
+    ctaUrl: "https://apps.apple.com/us/app/aur/id6760983455",
     footerText: "Serás redirigido a la app o a la tienda",
 };
 MENUS.MAIN = {
@@ -2274,6 +2274,7 @@ async function ensureUserContext(data) {
     const user = await getUser(from);
     console.log("🔍 User lookup:", user);
     // create session if not exists
+    sessions[from].address=user?.address;
     if (!sessions[from]) {
         sessions[from] = {
             phone: from,
