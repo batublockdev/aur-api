@@ -1237,6 +1237,10 @@ ${group.group_amount} USDC
                 "📲 Confirma la transacción en tu aplicación.",
                 phoneNumberId
             );
+            break;
+        case "SWAP_CANCEL":
+            await sendWhatsAppText(from, "❌ Cambio cancelado.", phoneNumberId);
+            break;
         case "CANCEL_VOICE_SEND":
             await sendWhatsAppText(from, "❌ Transaction canceled.", phoneNumberId);
             break;
@@ -1661,12 +1665,12 @@ async function handleText({ from, text, phoneNumberId }) {
             return;
         }
 
-        // aquí obtienes precio del DEX
+        // Obtener mejor ruta según dirección del swap
         const { sendAmount,
             expectedReceive,
             destMin,
             path,
-            fullPath } = await getBestPath(amount);
+            fullPath } = await getBestPathSwap(amount, session.swapFrom, session.swapTo);
 
         updateSession(from, {
             step: "SWAP_CONFIRM",
@@ -1927,19 +1931,32 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
 }
 
 
-async function getBestPath(sendAmount) {
+async function getBestPathSwap(sendAmount, fromAsset, toAsset) {
     try {
+        // Determinar assets origen y destino
+        let sourceAsset, destAssets;
+        
+        if (fromAsset === "XLM") {
+            sourceAsset = Asset.native();
+            destAssets = [toAsset === "USDC" ? USDCasset : new Asset(toAsset, "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN")];
+        } else if (fromAsset === "USDC") {
+            sourceAsset = USDCasset;
+            destAssets = [Asset.native()]; // Solo XLM como destino desde USDC
+        } else {
+            throw new Error("Unsupported asset pair");
+        }
+
         const paths = await server.strictSendPaths(
-            Asset.native(), // XLM
+            sourceAsset,
             sendAmount,
-            [USDCasset]
+            destAssets
         ).call();
 
         if (!paths.records.length) {
             throw new Error("No available paths (no liquidity)");
         }
 
-        // 🔥 Select best path (max destination_amount)
+        // Select best path (max destination_amount)
         const best = paths.records.reduce((prev, current) => {
             return parseFloat(current.destination_amount) >
                 parseFloat(prev.destination_amount)
@@ -1947,26 +1964,29 @@ async function getBestPath(sendAmount) {
                 : prev;
         });
 
-        // 💰 Expected receive
         const expectedReceive = best.destination_amount;
-        console.log(expectedReceive)
-        // 🔒 Slippage protection (1%)
-        const destMin = (
-            parseFloat(expectedReceive) * 0.99
-        ).toFixed(7);
-        console.log("minimo a recibir: ", destMin);
+        console.log("Expected receive:", expectedReceive);
+        
+        // Slippage protection (1%)
+        const destMin = (parseFloat(expectedReceive) * 0.99).toFixed(7);
+        console.log("Minimo a recibir:", destMin);
 
         return {
             sendAmount,
             expectedReceive,
             destMin,
             path: best.path,
-            fullPath: best, // optional (debug/info)
+            fullPath: best,
         };
     } catch (err) {
         console.error("Error getting best path:", err);
         throw err;
     }
+}
+
+async function getBestPath(sendAmount) {
+    // Legacy function for backward compatibility (XLM -> USDC)
+    return getBestPathSwap(sendAmount, "XLM", "USDC");
 }
 async function addUserToGroup(phoneid, code) {
 
