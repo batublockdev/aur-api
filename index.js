@@ -126,12 +126,15 @@ const MENUS = {
 MENUS.SWAP = {
 
     text:
-        `💱 Convertir dinero
+        `💱 *Cambiar dinero*
 
-¿Qué deseas hacer?`,
+¿Qué tienes?
+
+💵 Dólares (USDC)
+⚡ Stellar (XLM)`,
     buttons: [
-        { id: "SWAP_XLM_USDC", title: "🔄 XLM → USDC" },
-        { id: "SWAP_USDC_XLM", title: "🔄 USDC → XLM" },
+        { id: "SWAP_USDC_XLM", title: "💵 Dólares" },
+        { id: "SWAP_XLM_USDC", title: "⚡ Stellar" },
         { id: "SWAP_BACK", title: "🔙 Volver" },
     ],
 
@@ -326,7 +329,7 @@ MENUS.MY_MONEY = {
         },
         {
             id: "SWAP_MENU",
-            title: "🔄 USDC → XLM",
+            title: "💱 Cambiar",
         },
     ],
 };
@@ -1059,7 +1062,14 @@ Un asesor de AUR te responderá lo antes posible.`,
         case "SWAP_XLM_USDC":
             await sendWhatsAppText(
                 from,
-                "💱 Convertir XLM a USDC \n ¿Cuánto XLM quieres convertir? \n Ejemplo: 50",
+                `⚡ *Cambiar Stellar a dólares*
+
+Tu saldo: ${session?.amountxlm || '0'} XLM
+
+¿Cuánto quieres cambiar?
+
+💡 Escribe solo el número.
+Ejemplo: 100`,
                 phoneNumberId
             );
             updateSession(from, {
@@ -1071,7 +1081,14 @@ Un asesor de AUR te responderá lo antes posible.`,
         case "SWAP_USDC_XLM_":
             await sendWhatsAppText(
                 from,
-                "💱 Convertir USDC a XLM   \n ¿Cuánto USDC quieres convertir? \n Ejemplo: 50",
+                `💵 *Cambiar dólares a Stellar*
+
+Tu saldo: ${session?.amountusdc || '0'} USDC
+
+¿Cuánto quieres cambiar?
+
+💡 Escribe solo el número.
+Ejemplo: 10`,
                 phoneNumberId
             );
             updateSession(from, {
@@ -1634,7 +1651,7 @@ async function handleText({ from, text, phoneNumberId }) {
         if (isNaN(amount) || amount <= 0) {
             await sendWhatsAppText(
                 from,
-                "⚠️ Escribe un monto válido en XLM.",
+                "⚠️ Escribe un número válido.\nEjemplo: 50",
                 phoneNumberId
             );
             return;
@@ -1654,23 +1671,25 @@ async function handleText({ from, text, phoneNumberId }) {
             path
         });
 
+        const fromIcon = session.swapFrom === "XLM" ? "⚡" : "💵";
+        const toIcon = session.swapTo === "USDC" ? "💵" : "⚡";
+        const fromName = session.swapFrom === "XLM" ? "Stellar" : "dólares";
+        const toName = session.swapTo === "USDC" ? "dólares" : "Stellar";
+
         const message = `
-📄 Confirmar conversión
+✨ *Confirmar cambio*
 
-Enviar: ${amount} XLM
-Recibir aprox: ${destMin} USDC
+Envías: ${amount} ${session.swapFrom} ${fromIcon}
+Recibes: ~${destMin} ${session.swapTo} ${toIcon}
 
-⚠️ El valor puede variar según el mercado.
-
-¿Deseas continuar?
-`;
+¿Cambiar ahora?`;
 
         await sendMenu({
             to: from,
             phoneNumberId,
             text: message,
             buttons: [
-                { id: "SWAP_CONFIRM_YES", title: "✅ Confirmar" },
+                { id: "SWAP_CONFIRM_YES", title: "✅ Cambiar" },
                 { id: "SWAP_CANCEL", title: "❌ Cancelar" }
             ]
         });
