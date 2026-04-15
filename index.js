@@ -114,9 +114,6 @@ const MENUS = {
 ⚡ XLM: {amountxlm}
 💵 USDC: {amountusdc}
 
-📱 *Tu dirección:*
-\`{address}\`
-
 ¿Qué quieres hacer?`,
         buttons: [
             { id: "MAIN_MONEY", title: "💰 Mi platica" },
@@ -314,9 +311,6 @@ MENUS.MY_MONEY = {
 
 ⚡ XLM: {amountxlm}
 💵 USDC: {amountusdc}
-
-📱 *Tu dirección:*
-\`{address}\`
 
 ¿Qué quieres hacer?
 
@@ -969,8 +963,14 @@ Ejemplo:
             break;
         case "MAIN_MONEY":
             await sendWhatsAppText(from, "⏳ Actualizando tu saldo...", phoneNumberId);
-            const { amountxlm, amountusdc, address } = await UserBalance(session.address);
-            await showMenu("MY_MONEY", from, phoneNumberId, { name, amountusdc, amountxlm, address });
+            const { amountxlm: xlmBal, amountusdc: usdcBal, address: userAddr } = await UserBalance(session.address);
+            // Enviar explicación de la dirección
+            await sendWhatsAppText(from, `📱 *Tu dirección de wallet*
+\nEsta es tu dirección pública. Otros la usan para enviarte dinero.\n\n📍 *Copiala y pégala donde la necesites:*`, phoneNumberId);
+            // Enviar la dirección sola
+            await sendWhatsAppText(from, `\`${userAddr}\``, phoneNumberId);
+            // Enviar el menú
+            await showMenu("MY_MONEY", from, phoneNumberId, { name, amountusdc: usdcBal, amountxlm: xlmBal });
             break;
 
         case "HELP_CONTACT":
@@ -1595,7 +1595,12 @@ async function handleText({ from, text, phoneNumberId }) {
         await sendWhatsAppText(from, "⏳ Actualizando tu saldo...", phoneNumberId);
 
         const { amountxlm, amountusdc, address } = await UserBalance(session?.address);
-        await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amountxlm, amountusdc, address });
+        // Enviar explicación de la dirección
+        await sendWhatsAppText(from, `📱 *Tu dirección de wallet*\n\nEsta es tu dirección pública. Otros la usan para enviarte dinero.\n\n📍 *Copiala y pégala donde la necesites:*`, phoneNumberId);
+        // Enviar la dirección sola
+        await sendWhatsAppText(from, `\`${address}\``, phoneNumberId);
+        // Enviar el menú
+        await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amountxlm, amountusdc });
         updateSession(from, { step: null, to: null, amount: null, reason: null, multisigTransaction: null }); // reset any ongoing steps
         return;
     }
