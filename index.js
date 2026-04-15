@@ -263,7 +263,7 @@ Esta app guarda tu llave secreta, que es como la llave de tu casa 🏠🔑
 
 ⚠️ Nadie más puede verla, ni AUR.`,
     ctaText: " Abrir App AUR",
-    ctaUrl: "https://aur.app.link/open",
+    ctaUrl: "https://apps.apple.com/us/app/aur/id6760983455",
     footerText: "Serás redirigido a la app o a la tienda",
 };
 MENUS.MAIN = {
