@@ -47,8 +47,16 @@ function formatCOP(value) {
         minimumFractionDigits: 0
     }).format(value);
 }
-const UserBalance = async (address) => {
 
+function formatBalance(balance) {
+    const num = parseFloat(balance) || 0;
+    if (num === 0) return "0";
+    if (num < 0.01) return num.toExponential(2);
+    if (num < 1000) return num.toFixed(2);
+    if (num < 1000000) return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return num.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+const UserBalance = async (address) => {
     let amountusdc;
     let amountxlm;
     console.log("Fetching balance for address:", address);
@@ -69,11 +77,11 @@ const UserBalance = async (address) => {
     } else {
         console.log(`No ${USDCasset.getCode()} balance found`);
     }
-    return { amountxlm, amountusdc }
-
-
-
-
+    return {
+        amountxlm: formatBalance(amountxlm),
+        amountusdc: formatBalance(amountusdc),
+        address: address
+    };
 };
 const USDCasset = new Asset("USDC", "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN");
 let sessions = {};
@@ -99,14 +107,17 @@ let amount = "₱0";
 const MENUS = {
     ONBOARDING: {
         text:
-            `Hola {name}
-            
-Tu saldo actual es de:
+            `Hola {name} 👋
 
-💵 {amountxlm}
-💵 {amountusdc}
+💼 *Tu saldo:*
 
-¿Qué quieres hacer con tu dinero?`,
+⚡ XLM: {amountxlm}
+💵 USDC: {amountusdc}
+
+📱 *Tu dirección:*
+\`{address}\`
+
+¿Qué quieres hacer?`,
         buttons: [
             { id: "MAIN_MONEY", title: "💰 Mi platica" },
             { id: "MAIN_GROUPS", title: "👥 Mis grupos" },
@@ -299,14 +310,17 @@ Aquí puedes ahorrar con otras personas de forma segura.
 };
 MENUS.MY_MONEY = {
     text: `
-Tienes un saldo actual de:
+💼 *Tu saldo:*
 
-💵 xlm {amountxlm}
-💵 usdc {amountusdc}
+⚡ XLM: {amountxlm}
+💵 USDC: {amountusdc}
+
+📱 *Tu dirección:*
+\`{address}\`
 
 ¿Qué quieres hacer?
 
-**Escribe menu para volver**`,
+**Escribe "menu" para volver**`,
     buttons: [
         {
             id: "MONEY_SEND",
@@ -955,8 +969,8 @@ Ejemplo:
             break;
         case "MAIN_MONEY":
             await sendWhatsAppText(from, "⏳ Actualizando tu saldo...", phoneNumberId);
-            const { amountxlm, amountusdc } = await UserBalance(session.address);
-            await showMenu("MY_MONEY", from, phoneNumberId, { name, amountusdc, amountxlm });
+            const { amountxlm, amountusdc, address } = await UserBalance(session.address);
+            await showMenu("MY_MONEY", from, phoneNumberId, { name, amountusdc, amountxlm, address });
             break;
 
         case "HELP_CONTACT":
@@ -1580,8 +1594,8 @@ async function handleText({ from, text, phoneNumberId }) {
 
         await sendWhatsAppText(from, "⏳ Actualizando tu saldo...", phoneNumberId);
 
-        const { amountxlm, amountusdc } = await UserBalance(session?.address);
-        await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amountxlm, amountusdc });
+        const { amountxlm, amountusdc, address } = await UserBalance(session?.address);
+        await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amountxlm, amountusdc, address });
         updateSession(from, { step: null, to: null, amount: null, reason: null, multisigTransaction: null }); // reset any ongoing steps
         return;
     }
