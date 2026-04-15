@@ -1060,11 +1060,13 @@ Un asesor de AUR te responderá lo antes posible.`,
             await showMenu("SWAP", from, phoneNumberId);
             break;
         case "SWAP_XLM_USDC":
+            // Obtener saldo actual
+            const xlmBalance = await UserBalance(session.address);
             await sendWhatsAppText(
                 from,
                 `⚡ *Cambiar Stellar a dólares*
 
-Tu saldo: ${session?.amountxlm || '0'} XLM
+Tu saldo: ${xlmBalance.amountxlm} XLM
 
 ¿Cuánto quieres cambiar?
 
@@ -1078,12 +1080,14 @@ Ejemplo: 100`,
                 swapTo: "USDC"
             });
             break;
-        case "SWAP_USDC_XLM_":
+        case "SWAP_USDC_XLM":
+            // Obtener saldo actual
+            const usdcBalance = await UserBalance(session.address);
             await sendWhatsAppText(
                 from,
                 `💵 *Cambiar dólares a Stellar*
 
-Tu saldo: ${session?.amountusdc || '0'} USDC
+Tu saldo: ${usdcBalance.amountusdc} USDC
 
 ¿Cuánto quieres cambiar?
 
