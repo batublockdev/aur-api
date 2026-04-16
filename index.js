@@ -1546,13 +1546,29 @@ Aún no estás en ningún grupo.
 Pide un código AUR para unirte 💫`;
     }
 
-    let text = `👥 *Tus grupos, ${name}*\n\n`;
+    let text = `👥 *Mis natilleras*
+
+Hola ${name} 👋
+
+Tus grupos de ahorro:
+\n`;
 
     groups.forEach((g, i) => {
-        text += `${i + 1}. ${g.name}\n`;
+        const amount = g.group_amount > 0 ? `$${g.group_amount}` : "Flexible";
+        const interval = g.payment_interval_days === 7 ? "semana" : 
+                        g.payment_interval_days === 15 ? "quincena" :
+                        g.payment_interval_days === 30 ? "mes" : `${g.payment_interval_days} días`;
+        const members = g.members ? g.members.length : 0;
+        
+        text += `${i + 1}️⃣ *${g.name}*
+`;
+        text += `   💰 ${amount} / ${interval}
+`;
+        text += `   👥 ${members} personas\n\n`;
     });
 
-    text += `\n✍️ Responde con el *número del grupo* para ver detalles.`;
+    text += `¿Cuál quieres ver?
+Escribe el número.`;
 
     return text;
 }
