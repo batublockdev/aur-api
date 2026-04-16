@@ -1206,7 +1206,7 @@ Monto: ${group.group_amount} USDC 💵
                 };
 
                 await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
-                await Buildtransaction(group.multisig_address, session.to, session.amount.toString(), session);
+                await Buildtransaction(group.multisig_address, session.to, session.amount.toString(), session, session.memo);
                 await sendWhatsAppText(
                     from,
                     "📲 Los miembros deben confirmar la transacción en la aplicación.",
@@ -1225,7 +1225,7 @@ Monto: ${group.group_amount} USDC 💵
                 console.log("✅ Confirming voice transaction:", session);
 
                 await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
-                await Buildtransaction(session.address, session.to, session.amount.toString(), session);
+                await Buildtransaction(session.address, session.to, session.amount.toString(), session, session.memo);
 
                 await sendWhatsAppText(
                     from,
@@ -1246,6 +1246,28 @@ Monto: ${group.group_amount} USDC 💵
             break;
         case "SWAP_CANCEL":
             await sendWhatsAppText(from, "❌ Cambio cancelado.", phoneNumberId);
+            break;
+        case "SEND_SKIP_MEMO":
+            updateSession(from, {
+                step: "SEND_CONFIRM",
+                memo: null,
+            });
+
+            await sendMenu({
+                to: from,
+                phoneNumberId,
+                text: `✨ *Confirmar envío*
+
+Para: \`${session.to.substring(0, 20)}...\`
+
+Monto: ${session.amount} USDC 💵
+
+¿Enviar ahora?`,
+                buttons: [
+                    { id: "CONFIRM_VOICE_SEND", title: "✅ Enviar" },
+                    { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
+                ],
+            });
             break;
         case "CANCEL_VOICE_SEND":
             await sendWhatsAppText(from, "❌ Transaction canceled.", phoneNumberId);
@@ -1818,14 +1840,41 @@ Recibes: ~${destMin} ${session.swapTo} ${toIcon}
             return;
         }
 
-        // Determinar asset (por ahora USDC por defecto)
-        const assetIcon = "💵";
-        const assetName = "USDC";
+        updateSession(from, {
+            step: "SEND_WAITING_MEMO",
+            amount,
+        });
+
+        await sendMenu({
+            to: from,
+            phoneNumberId,
+            text: `📝 *¿Quieres agregar un memo?*
+
+El memo ayuda a identificar la transacción.
+
+Ejemplos:
+• "Pago renta"
+• "Préstamo Juan"
+• "Ahorro enero"
+
+💡 Escribe el memo o presiona "Sin memo":`,
+            buttons: [
+                { id: "SEND_SKIP_MEMO", title: "⏭️ Sin memo" },
+            ],
+        });
+        return;
+    }
+
+    if (session?.step === "SEND_WAITING_MEMO") {
+        const memo = text.trim();
 
         updateSession(from, {
-            amount,
-            step: "SEND_CONFIRM"
+            step: "SEND_CONFIRM",
+            memo: memo || null,
         });
+
+        const assetIcon = "💵";
+        const assetName = "USDC";
 
         await sendMenu({
             to: from,
@@ -1834,7 +1883,8 @@ Recibes: ~${destMin} ${session.swapTo} ${toIcon}
 
 Para: \`${session.to.substring(0, 20)}...\`
 
-Monto: ${amount} ${assetName} ${assetIcon}
+Monto: ${session.amount} ${assetName} ${assetIcon}
+${memo ? `Memo: ${memo}` : ''}
 
 ¿Enviar ahora?`,
             buttons: [
@@ -1842,7 +1892,6 @@ Monto: ${amount} ${assetName} ${assetIcon}
                 { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
             ],
         });
-
         return;
     }
     if (session?.step === "CREATING_GROUP_AMOUNT") {
@@ -3199,29 +3248,35 @@ function normalizeStellarAddress(input) {
 
     return cleaned;
 }
-async function Buildtransaction(address, destinationPublicKey, amount, session) {
+async function Buildtransaction(address, destinationPublicKey, amount, session, memo = null) {
     try {
 
         const user = await getUser(session.phone);
         console.log("Session", session);
         console.log("user", user);
 
-        console.log("Building transaction:", { address, destinationPublicKey, amount });
+        console.log("Building transaction:", { address, destinationPublicKey, amount, memo });
         const account = await server.loadAccount(address);
 
-        const tx = new TransactionBuilder(account, {
+        const txBuilder = new TransactionBuilder(account, {
             fee: BASE_FEE, // stroops
             networkPassphrase: Networks.PUBLIC,
         })
             .addOperation(
                 Operation.payment({
                     destination: destinationPublicKey,
-                    asset: USDCasset, // XLM
+                    asset: USDCasset, // USDC
                     amount: amount,        // must be string
                 })
             )
-            .setTimeout(3600)
-            .build();
+            .setTimeout(3600);
+
+        // Agregar memo si existe
+        if (memo) {
+            txBuilder.addMemo(Memo.text(memo));
+        }
+
+        const tx = txBuilder.build();
         const xdr = tx.toXDR()
         // Save this
         const query = `
