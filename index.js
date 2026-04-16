@@ -980,7 +980,7 @@ Ejemplo:
             await sendWhatsAppText(from, `📱 *Tu dirección de wallet*
 \nEsta es tu dirección pública. Otros la usan para enviarte dinero.\n\n📍 *Copiala y pégala donde la necesites:*`, phoneNumberId);
             // Enviar la dirección sola
-            await sendWhatsAppText(from, `\`${userAddr}\``, phoneNumberId);
+            await sendWhatsAppText(from, userAddr, phoneNumberId);
             // Enviar el menú
             await showMenu("MY_MONEY", from, phoneNumberId, { name, amountusdc: usdcBal, amountxlm: xlmBal });
             break;
@@ -1668,7 +1668,7 @@ async function handleText({ from, text, phoneNumberId }) {
         // Enviar explicación de la dirección
         await sendWhatsAppText(from, `📱 *Tu dirección para recibir*\n\nDale esta dirección a quien te quiera enviar dinero:\n\n📎 Copia y pega:`, phoneNumberId);
         // Enviar la dirección sola
-        await sendWhatsAppText(from, `\`${address}\``, phoneNumberId);
+        await sendWhatsAppText(from, address, phoneNumberId);
         // Enviar el menú
         await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amountxlm, amountusdc });
         updateSession(from, { step: null, to: null, amount: null, reason: null, multisigTransaction: null }); // reset any ongoing steps
