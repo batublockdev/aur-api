@@ -8,7 +8,8 @@ import {
     Horizon,
     StrKey,
     Keypair,
-    BASE_FEE
+    BASE_FEE,
+    Memo
 } from "stellar-sdk";
 import express from "express";
 import 'dotenv/config'
