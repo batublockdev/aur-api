@@ -1651,13 +1651,16 @@ async function handleText({ from, text, phoneNumberId }) {
             to: normalizedAddress,
         });
 
+        // Obtener saldo real
+        const sendBalance = await UserBalance(session.address);
+
         await sendWhatsAppText(
             from,
             `💰 *¿Cuánto quieres enviar?*
 
 Tu saldo disponible:
-💵 USDC: ${session?.amountusdc || '0'}
-⚡ XLM: ${session?.amountxlm || '0'}
+💵 USDC: ${sendBalance.amountusdc}
+⚡ XLM: ${sendBalance.amountxlm}
 
 💡 Escribe el monto en números:
 Ejemplo: 25`,
@@ -1799,6 +1802,10 @@ Recibes: ~${destMin} ${session.swapTo} ${toIcon}
             return;
         }
 
+        // Determinar asset (por ahora USDC por defecto)
+        const assetIcon = "💵";
+        const assetName = "USDC";
+
         updateSession(from, {
             amount,
             step: "SEND_CONFIRM"
@@ -1811,7 +1818,7 @@ Recibes: ~${destMin} ${session.swapTo} ${toIcon}
 
 Para: \`${session.to.substring(0, 20)}...\`
 
-Monto: ${amount} XLM ⚡
+Monto: ${amount} ${assetName} ${assetIcon}
 
 ¿Enviar ahora?`,
             buttons: [
