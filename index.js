@@ -2258,7 +2258,10 @@ async function handleUnregisteredUser(data, session) {
 
     // ========== CHECK ONBOARDING STEPS FIRST ==========
     // Si el usuario está en medio del flujo de onboarding, manejarlo aquí
+    console.log("🔍 Checking step:", session?.step);
+    
     if (session?.step === "ONBOARDING_WAITING_NAME") {
+        console.log("✅ Step matched: ONBOARDING_WAITING_NAME");
         // Usar el texto original del mensaje (no lowercase)
         const originalText = data.message?.text?.body || text || "";
         const userName = originalText.trim();
@@ -2279,9 +2282,11 @@ async function handleUnregisteredUser(data, session) {
     }
 
     if (session?.step === "ONBOARDING_WAITING_EMAIL") {
+        console.log("✅ Step matched: ONBOARDING_WAITING_EMAIL");
         // Usar el texto original del mensaje (no lowercase)
         const originalText = data.message?.text?.body || text || "";
         const email = originalText.trim().toLowerCase();
+        console.log("📧 Email received:", email);
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
             await sendWhatsAppText(from, "⚠️ Escribe un correo válido.\nEjemplo: nombre@email.com", data.phoneNumberId);
@@ -2292,6 +2297,7 @@ async function handleUnregisteredUser(data, session) {
             step: "ONBOARDING_WAITING_PEOPLE",
             onboardingData: { ...ob, email }
         });
+        console.log("📋 Updated session:", sessions[from]);
         await showMenu("ONBOARDING_PEOPLE", from, data.phoneNumberId, { name: ob.name || "Amigo" });
         return;
     }
