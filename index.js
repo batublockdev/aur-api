@@ -1082,7 +1082,9 @@ Un asesor de AUR te responderá lo antes posible.`,
             break;
         case "ABOUT_CREATE_ACCOUNT":
             // Iniciar flujo de onboarding
+            console.log("🆕 Starting onboarding for:", from);
             updateSession(from, { step: "ONBOARDING_WAITING_NAME" });
+            console.log("📋 Session after update:", sessions[from]);
             await sendWhatsAppText(from, MENUS.ONBOARDING_NAME.text, phoneNumberId);
             break;
         case "ABOUT_BACK":
@@ -2246,6 +2248,7 @@ async function addUserToGroup(phoneid, code) {
 }
 async function handleUnregisteredUser(data, session) {
     console.log("👤 Unregistered user:", data);
+    console.log("📋 Session state:", session);
 
     const from = data.from;
     const name = data.name || "amigo";
