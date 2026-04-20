@@ -2244,7 +2244,7 @@ async function addUserToGroup(phoneid, code) {
         [phoneid, groupId]
     );
 }
-async function handleUnregisteredUser(data) {
+async function handleUnregisteredUser(data, session) {
     console.log("👤 Unregistered user:", data);
 
     const from = data.from;
@@ -2253,6 +2253,49 @@ async function handleUnregisteredUser(data) {
     // data.text is already a string in your normalized object
     const text = (data.text || "").trim();
 
+    // ========== CHECK ONBOARDING STEPS FIRST ==========
+    // Si el usuario está en medio del flujo de onboarding, manejarlo aquí
+    if (session?.step === "ONBOARDING_WAITING_NAME") {
+        const userName = text.trim();
+        if (userName.length < 2) {
+            await sendWhatsAppText(from, "⚠️ Tu nombre debe tener al menos 2 caracteres.", data.phoneNumberId);
+            return;
+        }
+        updateSession(from, { 
+            step: "ONBOARDING_WAITING_EMAIL",
+            onboardingData: { name: userName }
+        });
+        await sendWhatsAppText(
+            from,
+            MENUS.ONBOARDING_EMAIL.text.replace("{name}", userName),
+            data.phoneNumberId
+        );
+        return;
+    }
+
+    if (session?.step === "ONBOARDING_WAITING_EMAIL") {
+        const email = text.trim().toLowerCase();
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            await sendWhatsAppText(from, "⚠️ Escribe un correo válido.\nEjemplo: nombre@email.com", data.phoneNumberId);
+            return;
+        }
+        const ob = session.onboardingData || {};
+        updateSession(from, { 
+            step: "ONBOARDING_WAITING_PEOPLE",
+            onboardingData: { ...ob, email }
+        });
+        await showMenu("ONBOARDING_PEOPLE", from, data.phoneNumberId, { name: ob.name || "Amigo" });
+        return;
+    }
+
+    if (session?.step === "ONBOARDING_WAITING_PEOPLE") {
+        // Re-mostrar menú de personas si escribe algo
+        await showMenu("ONBOARDING_PEOPLE", from, data.phoneNumberId, { name: session.onboardingData?.name || "Amigo" });
+        return;
+    }
+
+    // ========== NORMAL UNREGISTERED FLOW ==========
     // ALWAYS guard before using string methods
     const match = text.toUpperCase().match(/AUR-[A-Z0-9]+/);
 
@@ -2347,7 +2390,11 @@ app.post("/webhook", async (req, res) => {
                 }
                 if (action == "ONBOARD_ABOUT" || action == "ABOUT_CREATE_ACCOUNT") {
                     await handleInteractive(data);
+                }
 
+                // ========== ONBOARDING BUTTONS FOR UNREGISTERED USERS ==========
+                if (action.startsWith("ONBOARD_PEOPLE_") || action.startsWith("ONBOARD_GOAL_")) {
+                    await handleInteractive(data);
                 }
 
 
