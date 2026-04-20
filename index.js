@@ -282,6 +282,55 @@ Esta app guarda tu llave secreta, que es como la llave de tu casa 🏠🔑
     ctaUrl: "https://apps.apple.com/us/app/aur/id6760983455",
     footerText: "Serás redirigido a la app o a la tienda",
 };
+
+// ========== ONBOARDING FLOW MENUS ==========
+MENUS.ONBOARDING_NAME = {
+    text: `🆕 *Crear tu cuenta*
+
+Paso 1 de 4
+
+¿Cómo te llamas?`,
+};
+
+MENUS.ONBOARDING_EMAIL = {
+    text: `✅ Gracias, *{name}*
+
+Paso 2 de 4
+
+¿Cuál es tu correo electrónico?`,
+};
+
+MENUS.ONBOARDING_PEOPLE = {
+    text: `✅ Perfecto, *{name}*
+
+Paso 3 de 4
+
+¿Con cuántas personas quieres ahorrar en grupo?`,
+    buttons: [
+        { id: "ONBOARD_PEOPLE_1_2", title: "1-2 personas" },
+        { id: "ONBOARD_PEOPLE_3_5", title: "3-5 personas" },
+        { id: "ONBOARD_PEOPLE_6_10", title: "6-10 personas" },
+        { id: "ONBOARD_PEOPLE_10_PLUS", title: "Más de 10" },
+    ],
+};
+
+MENUS.ONBOARDING_GOAL = {
+    text: `✅ {people_count} personas
+
+Paso 4 de 4
+
+¿Cuál es la meta de ahorro del grupo?`,
+    buttons: [
+        { id: "ONBOARD_GOAL_VIAJE", title: "✈️ Viaje" },
+        { id: "ONBOARD_GOAL_EMERGENCIAS", title: "🚨 Emergencias" },
+        { id: "ONBOARD_GOAL_META", title: "🎯 Meta compartida" },
+        { id: "ONBOARD_GOAL_OTRO", title: "💡 Otro" },
+    ],
+};
+
+MENUS.ONBOARDING_COMPLETE = {
+    text: `🎉 *¡Listo, {name}!*\n\nYa estás en lista de espera.\n\nEn breve nos comunicamos contigo para avanzar con tu grupo de ahorro.\n\n📧 Te escribiremos a: {email}\n\n¡Gracias por confiar en AUR! 💚`,
+};
 MENUS.MAIN = {
     text: `Hola {name} ¿Que mas? \n\n¿Qué vamos a hacer hoy?`,
     buttons: [
@@ -1032,12 +1081,72 @@ Un asesor de AUR te responderá lo antes posible.`,
             await showMenu("ONBOARDING", from, phoneNumberId);
             break;
         case "ABOUT_CREATE_ACCOUNT":
-            await showMenu("CREATE_ACCOUNT", from, phoneNumberId);
-
+            // Iniciar flujo de onboarding
+            updateSession(from, { step: "ONBOARDING_WAITING_NAME" });
+            await sendWhatsAppText(from, MENUS.ONBOARDING_NAME.text, phoneNumberId);
             break;
         case "ABOUT_BACK":
             await showMenu("ONBOARDING", from, phoneNumberId);
             break;
+
+        // ========== ONBOARDING FLOW CASES ==========
+        case "ONBOARD_PEOPLE_1_2":
+            updateSession(from, { onboardingPeople: "1-2" });
+            await showMenu("ONBOARDING_GOAL", from, phoneNumberId, { people_count: "1-2" });
+            break;
+        case "ONBOARD_PEOPLE_3_5":
+            updateSession(from, { onboardingPeople: "3-5" });
+            await showMenu("ONBOARDING_GOAL", from, phoneNumberId, { people_count: "3-5" });
+            break;
+        case "ONBOARD_PEOPLE_6_10":
+            updateSession(from, { onboardingPeople: "6-10" });
+            await showMenu("ONBOARDING_GOAL", from, phoneNumberId, { people_count: "6-10" });
+            break;
+        case "ONBOARD_PEOPLE_10_PLUS":
+            updateSession(from, { onboardingPeople: "10+" });
+            await showMenu("ONBOARDING_GOAL", from, phoneNumberId, { people_count: "más de 10" });
+            break;
+        case "ONBOARD_GOAL_VIAJE":
+        case "ONBOARD_GOAL_EMERGENCIAS":
+        case "ONBOARD_GOAL_META":
+        case "ONBOARD_GOAL_OTRO": {
+            const goalMap = {
+                "ONBOARD_GOAL_VIAJE": "viaje",
+                "ONBOARD_GOAL_EMERGENCIAS": "emergencias",
+                "ONBOARD_GOAL_META": "meta_compartida",
+                "ONBOARD_GOAL_OTRO": "otro"
+            };
+            const goal = goalMap[action];
+            const ob = session.onboardingData || {};
+            
+            // Guardar en DB
+            try {
+                await conn.query(`
+                    INSERT INTO onboarding_responses (phoneid, name, email, people_count, savings_goal)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (phoneid) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        email = EXCLUDED.email,
+                        people_count = EXCLUDED.people_count,
+                        savings_goal = EXCLUDED.savings_goal,
+                        created_at = NOW()
+                `, [from, ob.name, ob.email, session.onboardingPeople, goal]);
+                console.log("✅ Onboarding guardado:", { from, name: ob.name, email: ob.email, people: session.onboardingPeople, goal });
+            } catch (dbErr) {
+                console.error("❌ Error guardando onboarding:", dbErr);
+            }
+            
+            // Mensaje final
+            await sendWhatsAppText(
+                from,
+                MENUS.ONBOARDING_COMPLETE.text.replace("{name}", ob.name || "Amigo").replace("{email}", ob.email || "tu correo"),
+                phoneNumberId
+            );
+            
+            // Limpiar step
+            updateSession(from, { step: null, onboardingPeople: null, onboardingData: null });
+            break;
+        }
         case "ONBOARD_ABOUT":
             await showMenu("ABOUT", from, phoneNumberId);
             break;
@@ -1672,6 +1781,49 @@ async function handleText({ from, text, phoneNumberId }) {
         // Enviar el menú
         await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amountxlm, amountusdc });
         updateSession(from, { step: null, to: null, amount: null, reason: null, multisigTransaction: null }); // reset any ongoing steps
+        return;
+    }
+
+    // ========== ONBOARDING FLOW STEPS ==========
+    if (session?.step === "ONBOARDING_WAITING_NAME") {
+        const name = text.trim();
+        if (name.length < 2) {
+            await sendWhatsAppText(from, "⚠️ Tu nombre debe tener al menos 2 caracteres.", phoneNumberId);
+            return;
+        }
+        updateSession(from, { 
+            step: "ONBOARDING_WAITING_EMAIL",
+            onboardingData: { name }
+        });
+        await sendWhatsAppText(
+            from,
+            MENUS.ONBOARDING_EMAIL.text.replace("{name}", name),
+            phoneNumberId
+        );
+        return;
+    }
+
+    if (session?.step === "ONBOARDING_WAITING_EMAIL") {
+        const email = text.trim().toLowerCase();
+        // Validación simple de email
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            await sendWhatsAppText(from, "⚠️ Escribe un correo válido.\nEjemplo: nombre@email.com", phoneNumberId);
+            return;
+        }
+        const ob = session.onboardingData || {};
+        updateSession(from, { 
+            step: "ONBOARDING_WAITING_PEOPLE",
+            onboardingData: { ...ob, email }
+        });
+        await showMenu("ONBOARDING_PEOPLE", from, phoneNumberId, { name: ob.name || "Amigo" });
+        return;
+    }
+
+    if (session?.step === "ONBOARDING_WAITING_PEOPLE") {
+        // Este step se maneja con botones en handleInteractive
+        // Pero si el usuario escribe algo, lo redirigimos
+        await showMenu("ONBOARDING_PEOPLE", from, phoneNumberId, { name: session.onboardingData?.name || "Amigo" });
         return;
     }
     if (session?.step === "SEND_WAITING_ADDRESS") {
