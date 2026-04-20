@@ -494,19 +494,29 @@ async function sendMenu({
 
 
 async function showMenu(menuKey, to, phoneNumberId, vars = {}) {
+    console.log("📋 showMenu called:", menuKey, "to:", to, "vars:", vars);
     const menu = MENUS[menuKey];
-    if (!menu) throw new Error(`Menu ${menuKey} not found`);
+    if (!menu) {
+        console.error("❌ Menu not found:", menuKey);
+        throw new Error(`Menu ${menuKey} not found`);
+    }
     const text = applyVars(menu.text, vars);
-    await sendMenu({
-        to,
-        phoneNumberId,
-        text: text,
-        buttons: menu.buttons,
-        ctaUrl: menu.ctaUrl,
-        ctaText: menu.ctaText,
-        headerImage: menu.headerImage,
-        footerText: menu.footerText,
-    });
+    console.log("📝 Menu text:", text);
+    try {
+        await sendMenu({
+            to,
+            phoneNumberId,
+            text: text,
+            buttons: menu.buttons,
+            ctaUrl: menu.ctaUrl,
+            ctaText: menu.ctaText,
+            headerImage: menu.headerImage,
+            footerText: menu.footerText,
+        });
+        console.log("✅ Menu sent successfully");
+    } catch (err) {
+        console.error("❌ Error sending menu:", err);
+    }
 }
 
 async function sendBackButton(to, phoneNumberId) {
