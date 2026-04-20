@@ -2256,7 +2256,9 @@ async function handleUnregisteredUser(data, session) {
     // ========== CHECK ONBOARDING STEPS FIRST ==========
     // Si el usuario está en medio del flujo de onboarding, manejarlo aquí
     if (session?.step === "ONBOARDING_WAITING_NAME") {
-        const userName = text.trim();
+        // Usar el texto original del mensaje (no lowercase)
+        const originalText = data.message?.text?.body || text || "";
+        const userName = originalText.trim();
         if (userName.length < 2) {
             await sendWhatsAppText(from, "⚠️ Tu nombre debe tener al menos 2 caracteres.", data.phoneNumberId);
             return;
@@ -2274,7 +2276,9 @@ async function handleUnregisteredUser(data, session) {
     }
 
     if (session?.step === "ONBOARDING_WAITING_EMAIL") {
-        const email = text.trim().toLowerCase();
+        // Usar el texto original del mensaje (no lowercase)
+        const originalText = data.message?.text?.body || text || "";
+        const email = originalText.trim().toLowerCase();
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
             await sendWhatsAppText(from, "⚠️ Escribe un correo válido.\nEjemplo: nombre@email.com", data.phoneNumberId);
