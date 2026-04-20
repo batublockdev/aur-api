@@ -305,26 +305,24 @@ MENUS.ONBOARDING_PEOPLE = {
 
 Paso 3 de 4
 
-¿Con cuántas personas quieres ahorrar en grupo?`,
+¿Con cuántas personas quieres ahorrar?`,
     buttons: [
-        { id: "ONBOARD_PEOPLE_1_2", title: "1-2 personas" },
-        { id: "ONBOARD_PEOPLE_3_5", title: "3-5 personas" },
-        { id: "ONBOARD_PEOPLE_6_10", title: "6-10 personas" },
-        { id: "ONBOARD_PEOPLE_10_PLUS", title: "Más de 10" },
+        { id: "ONBOARD_PEOPLE_SMALL", title: "1-5 personas" },
+        { id: "ONBOARD_PEOPLE_MEDIUM", title: "6-10 personas" },
+        { id: "ONBOARD_PEOPLE_LARGE", title: "Más de 10" },
     ],
 };
 
 MENUS.ONBOARDING_GOAL = {
-    text: `✅ {people_count} personas
+    text: `✅ {people_count}
 
 Paso 4 de 4
 
-¿Cuál es la meta de ahorro del grupo?`,
+¿Cuál es la meta del grupo?`,
     buttons: [
-        { id: "ONBOARD_GOAL_VIAJE", title: "✈️ Viaje" },
-        { id: "ONBOARD_GOAL_EMERGENCIAS", title: "🚨 Emergencias" },
-        { id: "ONBOARD_GOAL_META", title: "🎯 Meta compartida" },
-        { id: "ONBOARD_GOAL_OTRO", title: "💡 Otro" },
+        { id: "ONBOARD_GOAL_VIAJE", title: "Viaje" },
+        { id: "ONBOARD_GOAL_EMERGENCIAS", title: "Emergencias" },
+        { id: "ONBOARD_GOAL_OTRO", title: "Otro" },
     ],
 };
 
@@ -1102,30 +1100,24 @@ Un asesor de AUR te responderá lo antes posible.`,
             break;
 
         // ========== ONBOARDING FLOW CASES ==========
-        case "ONBOARD_PEOPLE_1_2":
-            updateSession(from, { onboardingPeople: "1-2" });
-            await showMenu("ONBOARDING_GOAL", from, phoneNumberId, { people_count: "1-2" });
+        case "ONBOARD_PEOPLE_SMALL":
+            updateSession(from, { onboardingPeople: "1-5" });
+            await showMenu("ONBOARDING_GOAL", from, phoneNumberId, { people_count: "1-5" });
             break;
-        case "ONBOARD_PEOPLE_3_5":
-            updateSession(from, { onboardingPeople: "3-5" });
-            await showMenu("ONBOARDING_GOAL", from, phoneNumberId, { people_count: "3-5" });
-            break;
-        case "ONBOARD_PEOPLE_6_10":
+        case "ONBOARD_PEOPLE_MEDIUM":
             updateSession(from, { onboardingPeople: "6-10" });
             await showMenu("ONBOARDING_GOAL", from, phoneNumberId, { people_count: "6-10" });
             break;
-        case "ONBOARD_PEOPLE_10_PLUS":
+        case "ONBOARD_PEOPLE_LARGE":
             updateSession(from, { onboardingPeople: "10+" });
             await showMenu("ONBOARDING_GOAL", from, phoneNumberId, { people_count: "más de 10" });
             break;
         case "ONBOARD_GOAL_VIAJE":
         case "ONBOARD_GOAL_EMERGENCIAS":
-        case "ONBOARD_GOAL_META":
         case "ONBOARD_GOAL_OTRO": {
             const goalMap = {
                 "ONBOARD_GOAL_VIAJE": "viaje",
                 "ONBOARD_GOAL_EMERGENCIAS": "emergencias",
-                "ONBOARD_GOAL_META": "meta_compartida",
                 "ONBOARD_GOAL_OTRO": "otro"
             };
             const goal = goalMap[action];
