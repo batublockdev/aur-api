@@ -1358,6 +1358,49 @@ Monto: ${group.group_amount} USDC 💵
                 phoneNumberId
             );
             break;
+        case "CANCEL_GROUP_PAY":
+            updateSession(from, { pendingGroupPay: null });
+            await sendWhatsAppText(from, "❌ Pago de grupo cancelado.", phoneNumberId);
+            break;
+        case "CONFIRM_GROUP_PAY":
+            // Extraer groupId del button id (formato: CONFIRM_GROUP_PAY_{groupId})
+            const groupId = buttonId.split("_")[3];
+            const groupPaySession = session.pendingGroupPay || {};
+            
+            // Buscar el grupo en el cache
+            let groupForPayment = session.groupsCache?.find(g => g.id === groupId);
+            const groupAddress = groupPaySession.groupAddress || groupForPayment?.multisig_address;
+            const groupAmount = groupPaySession.amount || groupForPayment?.group_amount;
+            const groupName = groupPaySession.groupName || groupForPayment?.name;
+            
+            if (!groupAddress || !groupAmount) {
+                await sendWhatsAppText(from, "⚠️ No hay grupo pendiente para pagar.", phoneNumberId);
+                return;
+            }
+            
+            // Registrar transacción pendiente
+            usersTransactions[session.address] = {
+                token: session.tokennotification,
+                to: groupAddress,
+                amount: groupAmount,
+                phone: from,
+                name: session.name,
+                date: new Date(),
+                groupId: groupId,
+                groupName: groupName,
+            };
+            
+            await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
+            await Buildtransaction(session.address, groupAddress, groupAmount.toString(), session, `Pago grupo ${groupName || ''}`);
+            
+            await sendWhatsAppText(
+                from,
+                `✅ Pago procesado para el grupo *${groupName}*\n💸 Monto: $${Number(groupAmount).toLocaleString("es-CO")}`,
+                phoneNumberId
+            );
+            
+            updateSession(from, { pendingGroupPay: null });
+            break;
         case "SWAP_CANCEL":
             await sendWhatsAppText(from, "❌ Cambio cancelado.", phoneNumberId);
             break;
@@ -2129,7 +2172,7 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
         if (isNaN(index) || !session.groupsCache || !session.groupsCache[index]) {
             await sendWhatsAppText(
                 from,
-                "⚠️ Escribe el número del grupo que quieres ver.",
+                "⚠️ Escribe el número del grupo que quieres.",
                 phoneNumberId
             );
             return;
@@ -2137,6 +2180,32 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
 
         const selectedGroup = session.groupsCache[index];
 
+        // Si venía de un pago por voz
+        if (session.pendingAction === "PAY_GROUP") {
+            const amount = session.pendingGroupPay?.amount || selectedGroup.group_amount;
+            await sendWhatsAppButtons(from, {
+                header: `💸 Pagar grupo: ${selectedGroup.name}`,
+                body: `Monto: $${Number(amount).toLocaleString("es-CO")}\nAporte mensual: $${Number(selectedGroup.group_amount).toLocaleString("es-CO")}`,
+                buttons: [
+                    { id: `CONFIRM_GROUP_PAY_${selectedGroup.id}`, title: "✅ Confirmar" },
+                    { id: "CANCEL_GROUP_PAY", title: "❌ Cancelar" },
+                ],
+            });
+            
+            updateSession(from, {
+                step: null,
+                pendingAction: null,
+                pendingGroupPay: {
+                    groupId: selectedGroup.id,
+                    groupName: selectedGroup.name,
+                    groupAddress: selectedGroup.multisig_address,
+                    amount: amount
+                }
+            });
+            return;
+        }
+
+        // Comportamiento anterior: ver detalles del grupo
         updateSession(from, {
             step: "VIEWING_GROUP",
             groupId: selectedGroup.id
@@ -2556,6 +2625,12 @@ async function handleVoice(mediaId, from) {
             model: "gemini-2.5-flash"
         });
 
+        // Obtener grupos del usuario para contexto de pago
+        const groups = await getUserGroups(from);
+        const groupsText = groups.length > 0
+            ? groups.map(g => `- ${g.name} (aporte: $${Number(g.group_amount).toLocaleString("es-CO")})`).join("\n")
+            : "No tiene grupos";
+
         const result = await model.generateContent([
             {
                 fileData: {
@@ -2570,13 +2645,22 @@ You are a crypto wallet assistant.
 Contacts:
 ${contactsText}
 
+Groups (for group payments):
+${groupsText}
+
 Return ONLY valid JSON:
 {
-  "action": "SEND" | "UNKNOWN",
+  "action": "SEND" | "PAY_GROUP" | "UNKNOWN",
   "contact": string | null,
   "address": string | null,
-  "amount": string | null
+  "amount": string | null,
+  "groupName": string | null
 }
+
+For PAY_GROUP:
+- If user says "pagar mi grupo", "pagar cuota", "pagar natillera", set action to "PAY_GROUP"
+- Try to match groupName from the user's groups list
+- If no specific group mentioned, set groupName to null
 `
             }
         ]);
@@ -2587,6 +2671,62 @@ Return ONLY valid JSON:
         }
 
         const parsed = JSON.parse(clean);
+
+        if (parsed.action === "PAY_GROUP") {
+            // Buscar grupo coincidente
+            let targetGroup = null;
+            
+            if (parsed.groupName) {
+                // Buscar por nombre (case insensitive, partial match)
+                targetGroup = groups.find(g => 
+                    g.name.toLowerCase().includes(parsed.groupName.toLowerCase()) ||
+                    parsed.groupName.toLowerCase().includes(g.name.toLowerCase())
+                );
+            }
+            
+            // Si no encontró por nombre y hay solo 1 grupo, usar ese
+            if (!targetGroup && groups.length === 1) {
+                targetGroup = groups[0];
+            }
+            
+            // Si no se encontró grupo y hay múltiples
+            if (!targetGroup && groups.length > 1) {
+                const groupOptions = groups.map((g, i) => `${i + 1}. ${g.name} - $${Number(g.group_amount).toLocaleString("es-CO")}`).join("\n");
+                await sendWhatsAppText(from, `¿A qué grupo querés pagar?\n\n${groupOptions}\n\nRespondé con el número.`);
+                updateSession(from, {
+                    step: "WAITING_GROUP_SELECTION",
+                    pendingAction: "PAY_GROUP",
+                    groupsCache: groups
+                });
+                return;
+            }
+            
+            // Si no tiene grupos
+            if (!targetGroup && groups.length === 0) {
+                return sendWhatsAppText(from, "❌ No tenés grupos activos para pagar.");
+            }
+            
+            // Confirmar pago al grupo
+            const amount = parsed.amount || targetGroup.group_amount;
+            await sendWhatsAppButtons(from, {
+                header: `💸 Pagar grupo: ${targetGroup.name}`,
+                body: `Monto: $${Number(amount).toLocaleString("es-CO")}\nAporte mensual: $${Number(targetGroup.group_amount).toLocaleString("es-CO")}`,
+                buttons: [
+                    { id: `CONFIRM_GROUP_PAY_${targetGroup.id}`, title: "✅ Confirmar" },
+                    { id: "CANCEL_GROUP_PAY", title: "❌ Cancelar" },
+                ],
+            });
+            
+            updateSession(from, {
+                pendingGroupPay: {
+                    groupId: targetGroup.id,
+                    groupName: targetGroup.name,
+                    groupAddress: targetGroup.multisig_address,
+                    amount: amount
+                }
+            });
+            return;
+        }
 
         if (parsed.action !== "SEND") {
             return sendWhatsAppText(from, "🤔 No send request detected.");
