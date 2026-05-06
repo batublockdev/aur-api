@@ -1362,21 +1362,17 @@ Monto: ${group.group_amount} USDC 💵
             updateSession(from, { pendingGroupPay: null });
             await sendWhatsAppText(from, "❌ Pago de grupo cancelado.", phoneNumberId);
             break;
-        case "CONFIRM_GROUP_PAY":
-            // Extraer groupId del button id (formato: CONFIRM_GROUP_PAY_{groupId})
-            const groupId = buttonId.split("_")[3];
-            const groupPaySession = session.pendingGroupPay || {};
+        case "CONFIRM_GROUP_PAY": {
+            const groupPayData = session.pendingGroupPay;
             
-            // Buscar el grupo en el cache
-            let groupForPayment = session.groupsCache?.find(g => g.id === groupId);
-            const groupAddress = groupPaySession.groupAddress || groupForPayment?.multisig_address;
-            const groupAmount = groupPaySession.amount || groupForPayment?.group_amount;
-            const groupName = groupPaySession.groupName || groupForPayment?.name;
-            
-            if (!groupAddress || !groupAmount) {
+            if (!groupPayData?.groupId) {
                 await sendWhatsAppText(from, "⚠️ No hay grupo pendiente para pagar.", phoneNumberId);
                 return;
             }
+            
+            const groupAddress = groupPayData.groupAddress;
+            const groupAmount = groupPayData.amount;
+            const groupName = groupPayData.groupName;
             
             // Registrar transacción pendiente
             usersTransactions[session.address] = {
@@ -1386,7 +1382,7 @@ Monto: ${group.group_amount} USDC 💵
                 phone: from,
                 name: session.name,
                 date: new Date(),
-                groupId: groupId,
+                groupId: groupPayData.groupId,
                 groupName: groupName,
             };
             
@@ -1401,6 +1397,7 @@ Monto: ${group.group_amount} USDC 💵
             
             updateSession(from, { pendingGroupPay: null });
             break;
+        }
         case "SWAP_CANCEL":
             await sendWhatsAppText(from, "❌ Cambio cancelado.", phoneNumberId);
             break;
@@ -2187,7 +2184,7 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
                 header: `💸 Pagar grupo: ${selectedGroup.name}`,
                 body: `Monto: $${Number(amount).toLocaleString("es-CO")}\nAporte mensual: $${Number(selectedGroup.group_amount).toLocaleString("es-CO")}`,
                 buttons: [
-                    { id: `CONFIRM_GROUP_PAY_${selectedGroup.id}`, title: "✅ Confirmar" },
+                    { id: "CONFIRM_GROUP_PAY", title: "✅ Confirmar" },
                     { id: "CANCEL_GROUP_PAY", title: "❌ Cancelar" },
                 ],
             });
@@ -2712,7 +2709,7 @@ For PAY_GROUP:
                 header: `💸 Pagar grupo: ${targetGroup.name}`,
                 body: `Monto: $${Number(amount).toLocaleString("es-CO")}\nAporte mensual: $${Number(targetGroup.group_amount).toLocaleString("es-CO")}`,
                 buttons: [
-                    { id: `CONFIRM_GROUP_PAY_${targetGroup.id}`, title: "✅ Confirmar" },
+                    { id: "CONFIRM_GROUP_PAY", title: "✅ Confirmar" },
                     { id: "CANCEL_GROUP_PAY", title: "❌ Cancelar" },
                 ],
             });
