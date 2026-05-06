@@ -2157,7 +2157,8 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
                 groupId: selectedGroup.id,
                 to: selectedGroup.multisig_address,
                 amount: amount,
-                groupsCache: session.groupsCache
+                groupsCache: session.groupsCache,
+                groupMembers: selectedGroup.members
             });
             return;
         }
@@ -2679,7 +2680,8 @@ For PAY_GROUP:
                 groupId: targetGroup.id,
                 to: targetGroup.multisig_address,
                 amount: amount,
-                groupsCache: groups
+                groupsCache: groups,
+                groupMembers: targetGroup.members
             });
             return;
         }
