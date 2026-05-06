@@ -1358,46 +1358,7 @@ Monto: ${group.group_amount} USDC 💵
                 phoneNumberId
             );
             break;
-        case "CANCEL_GROUP_PAY":
-            updateSession(from, { pendingGroupPay: null });
-            await sendWhatsAppText(from, "❌ Pago de grupo cancelado.", phoneNumberId);
-            break;
-        case "CONFIRM_GROUP_PAY": {
-            const groupPayData = session.pendingGroupPay;
-            
-            if (!groupPayData?.groupId) {
-                await sendWhatsAppText(from, "⚠️ No hay grupo pendiente para pagar.", phoneNumberId);
-                return;
-            }
-            
-            const groupAddress = groupPayData.groupAddress;
-            const groupAmount = groupPayData.amount;
-            const groupName = groupPayData.groupName;
-            
-            // Registrar transacción pendiente
-            usersTransactions[session.address] = {
-                token: session.tokennotification,
-                to: groupAddress,
-                amount: groupAmount,
-                phone: from,
-                name: session.name,
-                date: new Date(),
-                groupId: groupPayData.groupId,
-                groupName: groupName,
-            };
-            
-            await sendWhatsAppText(from, "⏳ Creando transacción...", phoneNumberId);
-            await Buildtransaction(session.address, groupAddress, groupAmount.toString(), session, `Pago grupo ${groupName || ''}`);
-            
-            await sendWhatsAppText(
-                from,
-                `✅ Pago procesado para el grupo *${groupName}*\n💸 Monto: $${Number(groupAmount).toLocaleString("es-CO")}`,
-                phoneNumberId
-            );
-            
-            updateSession(from, { pendingGroupPay: null });
-            break;
-        }
+
         case "SWAP_CANCEL":
             await sendWhatsAppText(from, "❌ Cambio cancelado.", phoneNumberId);
             break;
@@ -2184,20 +2145,19 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
                 header: `💸 Pagar grupo: ${selectedGroup.name}`,
                 body: `Monto: $${Number(amount).toLocaleString("es-CO")}\nAporte mensual: $${Number(selectedGroup.group_amount).toLocaleString("es-CO")}`,
                 buttons: [
-                    { id: "CONFIRM_GROUP_PAY", title: "✅ Confirmar" },
-                    { id: "CANCEL_GROUP_PAY", title: "❌ Cancelar" },
+                    { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
+                    { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
                 ],
             });
             
             updateSession(from, {
                 step: null,
                 pendingAction: null,
-                pendingGroupPay: {
-                    groupId: selectedGroup.id,
-                    groupName: selectedGroup.name,
-                    groupAddress: selectedGroup.multisig_address,
-                    amount: amount
-                }
+                multisigTransaction: true,
+                groupId: selectedGroup.id,
+                to: selectedGroup.multisig_address,
+                amount: amount,
+                groupsCache: session.groupsCache
             });
             return;
         }
@@ -2709,18 +2669,17 @@ For PAY_GROUP:
                 header: `💸 Pagar grupo: ${targetGroup.name}`,
                 body: `Monto: $${Number(amount).toLocaleString("es-CO")}\nAporte mensual: $${Number(targetGroup.group_amount).toLocaleString("es-CO")}`,
                 buttons: [
-                    { id: "CONFIRM_GROUP_PAY", title: "✅ Confirmar" },
-                    { id: "CANCEL_GROUP_PAY", title: "❌ Cancelar" },
+                    { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
+                    { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
                 ],
             });
             
             updateSession(from, {
-                pendingGroupPay: {
-                    groupId: targetGroup.id,
-                    groupName: targetGroup.name,
-                    groupAddress: targetGroup.multisig_address,
-                    amount: amount
-                }
+                multisigTransaction: true,
+                groupId: targetGroup.id,
+                to: targetGroup.multisig_address,
+                amount: amount,
+                groupsCache: groups
             });
             return;
         }
