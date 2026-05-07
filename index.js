@@ -3421,8 +3421,30 @@ app.post("/confirm-payment", async (req, res) => {
                     ]);
                     console.log(`Payment record created for user ${payer.phoneid} in group ${group.group_name} with amount ${amount}`);
 
-                    // Optional: send push notification via Expo using payer.tokennotification
-                    // await sendPushNotification(payer.tokennotification, `¡Pago registrado en ${group.group_name}!`);
+                    // Notificar a todos los miembros del grupo (excepto al que pagó)
+                    const membersResult = await conn.query(`
+                        SELECT u.phoneid, u.tokennotification, u.name
+                        FROM user_groups ug
+                        JOIN usuarios u ON u.phoneid = ug.user_phoneid
+                        WHERE ug.group_id = $1
+                    `, [group.group_id]);
+                    
+                    const payerName = payer.name || payer.phoneid;
+                    const paymentAmount = parseFloat(amount);
+                    
+                    for (const member of membersResult.rows) {
+                        // No enviar notificación al que pagó
+                        if (member.phoneid === payer.phoneid) continue;
+                        
+                        if (member.tokennotification && member.tokennotification != "x") {
+                            await sendTestPush(
+                                member.tokennotification, 
+                                { success: true, groupId: group.group_id },
+                                "Cuota pagada",
+                                `${payerName} acaba de pagar la cuota`
+                            );
+                        }
+                    }
 
                     // Optional: update group stats, mark round as paid, etc.
                     if (session) {
@@ -3639,12 +3661,12 @@ async function Buildtransaction(address, destinationPublicKey, amount, session, 
         if (session?.multisigTransaction) {
             session.groupMembers.forEach(member => {
                 if (member.tokennotification != "x") {
-                    sendTestPush(member.tokennotification, payload);
+                    sendTestPush(member.tokennotification, payload, "Confirmá el pago de grupo", "Abrí la app para firmar");
                 }
             });
         } else {
             if (user.tokennotification != "x") {
-                await sendTestPush(user.tokennotification, payload);
+                await sendTestPush(user.tokennotification, payload, "Confirmá tu transacción", "Abrí la app para firmar");
             }
         }
 
@@ -3799,7 +3821,7 @@ app.post('/delete-user', async (req, res) => {
         res.status(400).json({ error: err.message });
     }
 });
-async function sendTestPush(expoPushToken, solicitudData) {
+async function sendTestPush(expoPushToken, solicitudData, customTitle = null, customBody = null) {
     await fetch("https://exp.host/--/api/v2/push/send", {
         method: "POST",
         headers: {
@@ -3807,8 +3829,8 @@ async function sendTestPush(expoPushToken, solicitudData) {
         },
         body: JSON.stringify({
             to: expoPushToken,
-            title: "Solicitud",
-            body: "Solicitud generada desde el bot",
+            title: customTitle || "Solicitud",
+            body: customBody || "Solicitud generada desde el bot",
             sound: "default",
             data: {
                 screen: "/(tabs)/detalleSolicitud",
