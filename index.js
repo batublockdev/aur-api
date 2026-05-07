@@ -2553,7 +2553,7 @@ async function handleVoice(mediaId, from) {
 
     try {
         // 🎧 Acknowledge
-        await sendWhatsAppText(from, "🎧 Listening...");
+        await sendWhatsAppText(from, "🎧 Escuchando...");
 
         // 1️⃣ Download audio
         await downloadWhatsAppAudio(mediaId, inputPath);
@@ -2625,7 +2625,7 @@ For PAY_GROUP:
 
         const clean = extractJson(result.response.text());
         if (!clean) {
-            return sendWhatsAppText(from, "❌ I couldn't understand the request.");
+            return sendWhatsAppText(from, "❌ No pude entender la solicitud.");
         }
 
         const parsed = JSON.parse(clean);
@@ -2687,7 +2687,7 @@ For PAY_GROUP:
         }
 
         if (parsed.action !== "SEND") {
-            return sendWhatsAppText(from, "🤔 No send request detected.");
+            return sendWhatsAppText(from, "🤔 No detecté una solicitud de envío.");
         }
 
         // 5️⃣ Confirm
@@ -2708,7 +2708,7 @@ For PAY_GROUP:
 
     } catch (err) {
         console.error(err);
-        await sendWhatsAppText(from, "❌ Error processing voice message.");
+        await sendWhatsAppText(from, "❌ Error procesando el mensaje de voz.");
     } finally {
         if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
         if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
