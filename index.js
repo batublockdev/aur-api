@@ -3384,7 +3384,8 @@ app.post("/confirm-payment", async (req, res) => {
                     const userResult = await conn.query(`
                 SELECT phoneid, 
                        address,
-                       tokennotification
+                       tokennotification,
+                       name
                 FROM usuarios   -- or your table name: user_phoneid | address | tokennotification
                 WHERE address = $1
                 LIMIT 1
@@ -3429,8 +3430,8 @@ app.post("/confirm-payment", async (req, res) => {
                         WHERE ug.group_id = $1
                     `, [group.group_id]);
                     
-                    const payerName = payer.name || payer.phoneid;
-                    const paymentAmount = parseFloat(amount);
+                    const payerName = payer.name || 'Un miembro';
+                    const groupNameDisplay = group.group_name || 'el grupo';
                     
                     for (const member of membersResult.rows) {
                         // No enviar notificación al que pagó
@@ -3440,7 +3441,7 @@ app.post("/confirm-payment", async (req, res) => {
                             await sendTestPush(
                                 member.tokennotification, 
                                 { success: true, groupId: group.group_id },
-                                "Cuota pagada",
+                                `💰 ${groupNameDisplay}`,
                                 `${payerName} acaba de pagar la cuota`
                             );
                         }
