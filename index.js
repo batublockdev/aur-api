@@ -3854,9 +3854,15 @@ app.post("/guardian", async (req, res) => {
     try {
 
 
-        // 1️⃣ Find users with those addresses
+        // 1️⃣ Find users with those addresses (including secondary accounts)
         const users = await conn.query(
-            `SELECT phoneid FROM usuarios WHERE address = ANY($1)`,
+            `SELECT u.phoneid 
+             FROM usuarios u 
+             WHERE u.address = ANY($1)
+             UNION
+             SELECT sa.phone::text as phoneid 
+             FROM secondary_accounts sa 
+             WHERE sa.public_addr = ANY($1)`,
             [addresses]
         );
 
