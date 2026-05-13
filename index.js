@@ -3915,6 +3915,64 @@ app.post("/guardian", async (req, res) => {
     }
 });
 
+// Endpoint para generar transacción de cambio de weight
+app.post('/generate-weight-change', async (req, res) => {
+    const { sourcePublicKey, signerToAdd, signerToRemove, weight = 1 } = req.body;
+    
+    try {
+        // Cargar la cuenta source
+        const sourceAccount = await server.loadAccount(sourcePublicKey);
+        
+        // Construir la transacción
+        const txBuilder = new TransactionBuilder(sourceAccount, {
+            fee: BASE_FEE,
+            networkPassphrase: Networks.PUBLIC,
+        });
+        
+        // Agregar signer con weight
+        if (signerToAdd) {
+            txBuilder.addOperation(
+                Operation.setOptions({
+                    signer: {
+                        ed25519PublicKey: signerToAdd,
+                        weight: weight
+                    }
+                })
+            );
+        }
+        
+        // Remover signer (weight = 0)
+        if (signerToRemove) {
+            txBuilder.addOperation(
+                Operation.setOptions({
+                    signer: {
+                        ed25519PublicKey: signerToRemove,
+                        weight: 0
+                    }
+                })
+            );
+        }
+        
+        const tx = txBuilder.setTimeout(3600).build();
+        const xdr = tx.toXDR();
+        const hash = tx.hash().toString('hex');
+        
+        res.json({
+            success: true,
+            xdr: xdr,
+            hash: hash,
+            sourceAccount: sourcePublicKey
+        });
+        
+    } catch (error) {
+        console.error('Error generating weight change transaction:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
 app.listen(3000, () => {
     console.log("🤖 WhatsApp bot running on port 3000");
 });
