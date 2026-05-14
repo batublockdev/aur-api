@@ -3856,25 +3856,35 @@ app.post("/guardian", async (req, res) => {
 
         // 1️⃣ Find users with those addresses (including secondary accounts)
         const users = await conn.query(
-            `SELECT u.phoneid 
+            `SELECT u.phoneid, u.address
              FROM usuarios u 
              WHERE u.address = ANY($1)
              UNION
-             SELECT sa.phone::text as phoneid 
+             SELECT sa.phone::text as phoneid, sa.public_addr as address
              FROM secondary_accounts sa 
              WHERE sa.public_addr = ANY($1)`,
             [addresses]
         );
 
+        // Si no hay usuarios encontrados, retornar ok pero indicando que no se procesaron
         if (users.rows.length === 0) {
-            throw new Error("No users found for provided addresses");
+            console.log("No users found for addresses:", addresses);
+            return res.json({
+                success: true,
+                users_added: 0,
+                group_id: null,
+                message: "No users found for provided addresses"
+            });
         }
 
-
-
-
-
         const phoneIds = users.rows.map(u => u.phoneid);
+        const foundAddresses = users.rows.map(u => u.address);
+        
+        // Log addresses not found
+        const notFoundAddresses = addresses.filter(a => !foundAddresses.includes(a));
+        if (notFoundAddresses.length > 0) {
+            console.log("Addresses not found:", notFoundAddresses);
+        }
 
         // 2️⃣ Insert into user_groups
         const result = await conn.query(
@@ -3885,10 +3895,18 @@ app.post("/guardian", async (req, res) => {
             WHERE address = ANY($1)
             RETURNING group_id
             `,
-            [addresses]
+            [foundAddresses]
         );
+        
+        // Si no hay resultado pero hay usuarios, crear grupo nuevo
         if (result.rows.length === 0) {
-            throw new Error("No users found for provided addresses");
+            console.log("No group created, but users found:", phoneIds);
+            return res.json({
+                success: true,
+                users_added: phoneIds.length,
+                group_id: null,
+                message: "Users found but no group created"
+            });
         }
 
         const group_id = result.rows[0].group_id;
@@ -3906,7 +3924,9 @@ app.post("/guardian", async (req, res) => {
         res.json({
             success: true,
             users_added: phoneIds.length,
-            group_id
+            group_id,
+            found_addresses: foundAddresses,
+            not_found_addresses: notFoundAddresses
         });
 
     } catch (err) {
