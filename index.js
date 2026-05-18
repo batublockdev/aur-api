@@ -3973,7 +3973,7 @@ app.post('/generate-weight-change', async (req, res) => {
             );
         }
         
-        const tx = txBuilder.setTimeout(3600).build();
+        const tx = txBuilder.setTimeout(86400).build(); // 24 horas
         const xdr = tx.toXDR();
         const hash = tx.hash().toString('hex');
         
