@@ -3993,6 +3993,73 @@ app.post('/generate-weight-change', async (req, res) => {
     }
 });
 
+// Endpoint para modificar thresholds de una cuenta
+app.post('/generate-threshold-change', async (req, res) => {
+    const { 
+        sourcePublicKey, 
+        masterWeight,
+        lowThreshold,
+        medThreshold,
+        highThreshold 
+    } = req.body;
+    
+    try {
+        // Cargar la cuenta source
+        const sourceAccount = await server.loadAccount(sourcePublicKey);
+        
+        // Construir la transacción
+        const txBuilder = new TransactionBuilder(sourceAccount, {
+            fee: BASE_FEE,
+            networkPassphrase: Networks.PUBLIC,
+        });
+        
+        // Crear objeto de opciones
+        const options = {};
+        
+        if (masterWeight !== undefined) {
+            options.masterWeight = masterWeight;
+        }
+        if (lowThreshold !== undefined) {
+            options.lowThreshold = lowThreshold;
+        }
+        if (medThreshold !== undefined) {
+            options.medThreshold = medThreshold;
+        }
+        if (highThreshold !== undefined) {
+            options.highThreshold = highThreshold;
+        }
+        
+        // Agregar operación SetOptions
+        txBuilder.addOperation(
+            Operation.setOptions(options)
+        );
+        
+        const tx = txBuilder.setTimeout(86400).build(); // 24 horas
+        const xdr = tx.toXDR();
+        const hash = tx.hash().toString('hex');
+        
+        res.json({
+            success: true,
+            xdr: xdr,
+            hash: hash,
+            sourceAccount: sourcePublicKey,
+            thresholds: {
+                masterWeight: masterWeight || 'unchanged',
+                lowThreshold: lowThreshold || 'unchanged',
+                medThreshold: medThreshold || 'unchanged',
+                highThreshold: highThreshold || 'unchanged'
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error generating threshold change transaction:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
 app.listen(3000, () => {
     console.log("🤖 WhatsApp bot running on port 3000");
 });
