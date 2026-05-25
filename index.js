@@ -739,23 +739,25 @@ function buildGroupReportText(group, trm = 4250) {
         }).join("\n");
     }
 
-    // Construir texto de miembros (simplificado para ahorrar espacio)
+    // Construir texto de miembros
     let membersText = "";
     membersWithStatus.forEach(m => {
         const lastDate = m.lastPayment 
             ? m.lastPayment.toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" })
             : "-";
-        membersText += `${m.index}. ${m.statusEmoji} ${formatWithCop(m.paid, trm)} (${m.status})\n`;
+        membersText += `${m.index}. ${m.phoneid} ${m.statusEmoji}
+   💵 ${formatWithCop(m.paid, trm)} | ${m.status}\n`;
     });
 
     return `📊 *${group.name}*
 
-💰 Total: ${formatWithCop(totalCollected, trm)}
+💰 *Total ahorrado:* ${formatWithCop(totalCollected, trm)}
+🏦 *Balance:* ${formatWithCop(totalCollected, trm)}
+💸 *Prestado:* $0 USD
+📈 *Intereses:* $0 USD
 
 👥 *Miembros (${members.length})*
-${membersText}
-📝 Últimos movimientos:
-${movementsText}`;
+${membersText}`;
 }
 
 function generateGroupCode() {
