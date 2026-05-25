@@ -1209,7 +1209,7 @@ Un asesor de AUR te responderá lo antes posible.`,
                 phoneNumberId,
                 text: reportText,
                 buttons: [
-                    { id: "GROUP_ALL_MOVEMENTS", title: "💳 Ver todos los movimientos" },
+                    { id: "GROUP_ALL_MOVEMENTS", title: "💳 Movimientos" },
                     { id: "GROUPS_HOME", title: "⬅️ Volver" }
                 ]
             });
