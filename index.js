@@ -475,7 +475,7 @@ async function sendMenu({
         };
     }
 
-    await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    const response = await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -488,6 +488,13 @@ async function sendMenu({
             interactive,
         }),
     });
+    
+    const result = await response.json();
+    console.log("📱 WhatsApp API response:", JSON.stringify(result, null, 2));
+    
+    if (!response.ok) {
+        console.error("❌ WhatsApp API error:", result);
+    }
 }
 
 
