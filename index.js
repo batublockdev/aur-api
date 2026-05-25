@@ -613,8 +613,8 @@ async function openGroupDetail(to, phoneNumberId, group, currentUserPhoneId) {
 
     if (isActive) {
         buttons = [
-            { id: `GROUP_CONTRIBUTE`, title: "💸 Aportar ahora" },
-            { id: `GROUP_PROPOSE_EXPENSE`, title: "📝 Solicitudes" },
+            { id: "GROUP_REPORT", title: "📊 Informe" },
+            { id: "GROUP_ACTIONS", title: "⚡ Acciones" },
             { id: "GROUPS_HOME", title: "⬅️ Volver" },
         ];
     } else if (!isActive && isCreator) {
@@ -637,6 +637,113 @@ async function openGroupDetail(to, phoneNumberId, group, currentUserPhoneId) {
         buttons,
     });
 }
+function buildGroupReportText(group) {
+    const members = group.members || [];
+    const payments = group.payments || [];
+    const totalCollected = Number(group.total_amount_collected) || 0;
+    const groupAmount = Number(group.group_amount) || 0;
+
+    // Agrupar pagos por miembro
+    const memberPayments = {};
+    payments.forEach(p => {
+        const phone = p.user_phoneid;
+        if (!memberPayments[phone]) {
+            memberPayments[phone] = { total: 0, lastPayment: null, count: 0 };
+        }
+        memberPayments[phone].total += Number(p.amount) || 0;
+        memberPayments[phone].count++;
+        const paymentDate = new Date(p.created_at);
+        if (!memberPayments[phone].lastPayment || paymentDate > memberPayments[phone].lastPayment) {
+            memberPayments[phone].lastPayment = paymentDate;
+        }
+    });
+
+    // Calcular estado de cada miembro
+    const membersWithStatus = members.map((m, i) => {
+        const paid = memberPayments[m.phoneid]?.total || 0;
+        const lastPayment = memberPayments[m.phoneid]?.lastPayment;
+        const paymentsCount = memberPayments[m.phoneid]?.count || 0;
+
+        // Calcular cuotas esperadas (simplificado: desde que se unió)
+        const joinedAt = new Date(m.joined_at);
+        const now = new Date();
+        const daysSinceJoined = Math.floor((now - joinedAt) / (1000 * 60 * 60 * 24));
+        const expectedPayments = Math.max(1, Math.ceil(daysSinceJoined / (group.payment_interval_days || 30)));
+        const expectedTotal = expectedPayments * groupAmount;
+        const debt = expectedTotal - paid;
+
+        let status = "✅ Al día";
+        let statusEmoji = "✅";
+        if (debt > 0) {
+            const missedPayments = Math.floor(debt / groupAmount);
+            if (missedPayments >= 2) {
+                status = `Atrasado ${missedPayments} cuotas`;
+                statusEmoji = "❌";
+            } else if (missedPayments === 1) {
+                status = "Pendiente 1 cuota";
+                statusEmoji = "⚠️";
+            }
+        }
+
+        return {
+            index: i + 1,
+            phoneid: m.phoneid,
+            paid,
+            lastPayment,
+            paymentsCount,
+            debt: Math.max(0, debt),
+            status,
+            statusEmoji
+        };
+    });
+
+    // Últimos 5 movimientos
+    const recentPayments = payments.slice(0, 5);
+    let movementsText = "Sin movimientos aún";
+    if (recentPayments.length > 0) {
+        movementsText = recentPayments.map(p => {
+            const member = members.find(m => m.phoneid === p.user_phoneid);
+            const date = new Date(p.created_at).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" });
+            return `• ${member?.phoneid || "Usuario"} - $${Number(p.amount).toLocaleString("es-CO")} (${date})`;
+        }).join("\n");
+    }
+
+    // Construir texto de miembros
+    let membersText = "";
+    membersWithStatus.forEach(m => {
+        const lastDate = m.lastPayment 
+            ? m.lastPayment.toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" })
+            : "-";
+        membersText += `
+${m.index}. ${m.phoneid} ${m.statusEmoji}
+   💵 Aportado: $${m.paid.toLocaleString("es-CO")}
+   📅 Último: ${lastDate}
+   ⏰ Estado: ${m.status}`;
+    });
+
+    return `📊 *Informe del Grupo: ${group.name}*
+
+━━━━━━━━━━━━━━━━━
+💰 RESUMEN FINANCIERO
+━━━━━━━━━━━━━━━━━
+
+💵 Total ahorrado: $${totalCollected.toLocaleString("es-CO")}
+🏦 Balance en cuenta: $${totalCollected.toLocaleString("es-CO")}
+💸 Total prestado: $0
+📈 Intereses generados: $0
+
+━━━━━━━━━━━━━━━━━
+👥 ESTADO DE MIEMBROS (${members.length})
+━━━━━━━━━━━━━━━━━
+${membersText}
+
+━━━━━━━━━━━━━━━━━
+📝 ÚLTIMOS MOVIMIENTOS
+━━━━━━━━━━━━━━━━━
+
+${movementsText}`;
+}
+
 function generateGroupCode() {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     // removed confusing characters: O, I, 0, 1
@@ -1076,6 +1183,101 @@ Un asesor de AUR te responderá lo antes posible.`,
             );
             await handleActivateGroup(from, phoneNumberId, session.groupId, session);
             break;
+
+        case "GROUP_REPORT": {
+            // 📊 Informe detallado del grupo
+            group = session.groupsCache?.find(g => g.id === session.groupId);
+            if (!group) {
+                await sendWhatsAppText(from, "⚠️ No se encontró el grupo. Intenta de nuevo.", phoneNumberId);
+                break;
+            }
+            const reportText = buildGroupReportText(group);
+            await sendMenu({
+                to: from,
+                phoneNumberId,
+                text: reportText,
+                buttons: [
+                    { id: "GROUP_ALL_MOVEMENTS", title: "💳 Ver todos los movimientos" },
+                    { id: "GROUPS_HOME", title: "⬅️ Volver" }
+                ]
+            });
+            break;
+        }
+
+        case "GROUP_ACTIONS": {
+            // ⚡ Menú de acciones del grupo
+            group = session.groupsCache?.find(g => g.id === session.groupId);
+            if (!group) {
+                await sendWhatsAppText(from, "⚠️ No se encontró el grupo. Intenta de nuevo.", phoneNumberId);
+                break;
+            }
+            await sendMenu({
+                to: from,
+                phoneNumberId,
+                text: `⚡ *Acciones del Grupo: ${group.name}*\n\n¿Qué querés hacer?`,
+                buttons: [
+                    { id: "GROUP_CONTRIBUTE", title: "💸 Aportar ahora" },
+                    { id: "GROUP_PROPOSALS", title: "📝 Solicitudes" },
+                    { id: "GROUPS_HOME", title: "⬅️ Volver" }
+                ]
+            });
+            break;
+        }
+
+        case "GROUP_ALL_MOVEMENTS": {
+            // 💳 Ver todos los movimientos
+            group = session.groupsCache?.find(g => g.id === session.groupId);
+            if (!group) {
+                await sendWhatsAppText(from, "⚠️ No se encontró el grupo.", phoneNumberId);
+                break;
+            }
+            const allPayments = group.payments || [];
+            const members = group.members || [];
+            
+            let movementsText = "📋 *Todos los movimientos*\n\n";
+            if (allPayments.length === 0) {
+                movementsText += "No hay movimientos registrados.";
+            } else {
+                allPayments.forEach(p => {
+                    const member = members.find(m => m.phoneid === p.user_phoneid);
+                    const date = new Date(p.created_at).toLocaleDateString("es-CO", { 
+                        day: "2-digit", 
+                        month: "2-digit", 
+                        year: "numeric" 
+                    });
+                    movementsText += `• ${member?.phoneid || "Usuario"} - $${Number(p.amount).toLocaleString("es-CO")} (${date})\n`;
+                });
+            }
+            
+            await sendMenu({
+                to: from,
+                phoneNumberId,
+                text: movementsText,
+                buttons: [
+                    { id: "GROUP_REPORT", title: "⬅️ Volver" }
+                ]
+            });
+            break;
+        }
+
+        case "GROUP_PROPOSALS": {
+            // 📝 Menú de solicitudes
+            group = session.groupsCache?.find(g => g.id === session.groupId);
+            if (!group) {
+                await sendWhatsAppText(from, "⚠️ No se encontró el grupo.", phoneNumberId);
+                break;
+            }
+            await sendMenu({
+                to: from,
+                phoneNumberId,
+                text: `📝 *Solicitudes del Grupo: ${group.name}*\n\nNo hay solicitudes pendientes.\n\nLos miembros pueden solicitar:\n• Préstamos del fondo\n• Reembolsos por gastos\n• Cambios en las reglas`,
+                buttons: [
+                    { id: "CREATE_GASTO", title: "➕ Nueva solicitud" },
+                    { id: "GROUP_ACTIONS", title: "⬅️ Volver" }
+                ]
+            });
+            break;
+        }
 
         case "HELP_BACK":
             await showMenu("MAIN", from, phoneNumberId, { name });
