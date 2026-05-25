@@ -582,7 +582,7 @@ ${list}
 
 ✍️ Escribe el número del grupo que quieres ver.`;
 }
-async function openGroupDetail(to, phoneNumberId, group, currentUserPhoneId) {
+async function openGroupDetail(to, phoneNumberId, group, currentUserPhoneId, trm = 4250) {
     // group viene del query anterior (getUserGroups o similar)
     // Asegúrate de que incluya: id, name, amount, payment_interval_days, is_active, created_by, my_joined_at, members, payments, total_amount_collected, my_total_paid
 
@@ -606,7 +606,7 @@ async function openGroupDetail(to, phoneNumberId, group, currentUserPhoneId) {
             statusText = "✅ Estás al día";
         } else {
             const deuda = expectedPerUser - myTotalPaid;
-            statusText = `⚠️ Tienes una deuda de $${deuda.toLocaleString("es-CO")}`;
+            statusText = `⚠️ Tienes una deuda de ${formatWithCop(deuda, trm)}`;
         }
 
         // Próximo pago: puedes calcularlo mejor con la fecha del último pago + interval
@@ -617,14 +617,14 @@ async function openGroupDetail(to, phoneNumberId, group, currentUserPhoneId) {
     // ── Texto base común ─────────────────────────────────────────────────────
     let text = `👥 *${group.name}*\n\n`;
 
-    text += `💰 Aporte individual: $${Number(group.group_amount).toLocaleString("es-CO")}\n`;
+    text += `💰 Aporte individual: ${formatWithCop(Number(group.group_amount), trm)}\n`;
     text += `📅 Frecuencia: Cada ${group.payment_interval_days} días\n`;
     text += `🟢 Estado: ${isActive ? "Activo" : "Pendiente de creación"}\n\n`;
 
     if (isActive) {
         text += `Miembros: ${group.members?.length || 0}\n`;
-        text += `Total recolectado: $${Number(group.total_amount_collected || 0).toLocaleString("es-CO")}\n`;
-        text += `Tú has aportado: $${myTotalPaid.toLocaleString("es-CO")}\n\n`;
+        text += `Total recolectado: ${formatWithCop(Number(group.total_amount_collected || 0), trm)}\n`;
+        text += `Tú has aportado: ${formatWithCop(myTotalPaid, trm)}\n\n`;
         text += `${statusText}\n`;
         text += `Próximo aporte: ${nextPaymentDate}\n\n`;
         text += `¿Qué deseas hacer?`;
@@ -848,12 +848,13 @@ async function handleInteractive({ from, interactive, phoneNumberId, name }) {
             session.inviteCode = inviteCode;
             await createGroup({ name: session.groupName, createdBy: from, amount: session.amount, paymentIntervalDays: value, inviteCode });
             await addUserToGroup(from, inviteCode); // Add creator to the group
+            const trm = session.trm || 4250;
             await sendWhatsAppText(
                 from,
                 `Grupo en espera
 
 Nombre: ${session.groupName}
-Monto: ${session.amount === 0 ? "Sin monto fijo" : session.amount}
+Monto: ${session.amount === 0 ? "Sin monto fijo" : formatWithCop(session.amount, trm)}
 Frecuencia: ${session.frequency}
 
 Tú ya haces parte del grupo como creador.
@@ -878,7 +879,7 @@ Ahora invita a los participantes con el mensaje que te enviaré a continuación 
 🎉 Te invito a un grupo de ahorro
 
 Nombre: ${session.groupName}
-Monto: ${session.amount === 0 ? "Aporte flexible" : session.amount}
+Monto: ${session.amount === 0 ? "Aporte flexible" : formatWithCop(session.amount, trm)}
 Frecuencia: ${session.frequency}
 
 👉 Únete aquí:
@@ -913,13 +914,13 @@ ${link}
             session.inviteCode = inviteCode;
             await createGroup({ name: session.groupName, createdBy: from, amount: session.amount, paymentIntervalDays: value, inviteCode });
             await addUserToGroup(from, inviteCode); // Add creator to the group
-
+            const trm = session.trm || 4250;
             await sendWhatsAppText(
                 from,
                 `Grupo en espera
 
 Nombre: ${session.groupName}
-Monto: ${session.amount === 0 ? "Sin monto fijo" : session.amount}
+Monto: ${session.amount === 0 ? "Sin monto fijo" : formatWithCop(session.amount, trm)}
 Frecuencia: ${session.frequency}
 
 Tú ya haces parte del grupo como creador.
@@ -944,7 +945,7 @@ Ahora invita a los participantes con el mensaje que te enviaré a continuación 
 🎉 Te invito a un grupo de ahorro
 
 Nombre: ${session.groupName}
-Monto: ${session.amount === 0 ? "Aporte flexible" : session.amount}
+Monto: ${session.amount === 0 ? "Aporte flexible" : formatWithCop(session.amount, trm)}
 Frecuencia: ${session.frequency}
 
 👉 Únete aquí:
@@ -979,18 +980,16 @@ ${link}
             session.inviteCode = inviteCode;
             await createGroup({ name: session.groupName, createdBy: from, amount: session.amount, paymentIntervalDays: value, inviteCode });
             await addUserToGroup(from, inviteCode); // Add creator to the group
-
+            const trm = session.trm || 4250;
             await sendWhatsAppText(
                 from,
                 `Grupo en espera
 
 Nombre: ${session.groupName}
-Monto: ${session.amount === 0 ? "Sin monto fijo" : session.amount}
+Monto: ${session.amount === 0 ? "Sin monto fijo" : formatWithCop(session.amount, trm)}
 Frecuencia: ${session.frequency}
 
-Tú ya haces parte del grupo como creador.
-
-Ahora invita a los participantes con el mensaje que te enviaré a continuación una vez esten todos debes confirmar la creacion.`,
+Tú ya haces parte del grupo como creador.\n\nAhora invita a los participantes con el mensaje que te enviaré a continuación una vez esten todos debes confirmar la creacion.`,
                 phoneNumberId
             );
 
@@ -1010,7 +1009,7 @@ Ahora invita a los participantes con el mensaje que te enviaré a continuación 
 🎉 Te invito a un grupo de ahorro
 
 Nombre: ${session.groupName}
-Monto: ${session.amount === 0 ? "Aporte flexible" : session.amount}
+Monto: ${session.amount === 0 ? "Aporte flexible" : formatWithCop(session.amount, trm)}
 Frecuencia: ${session.frequency}
 
 👉 Únete aquí:
@@ -1485,7 +1484,7 @@ Ejemplo: 10`,
 
 Para: \`${group.multisig_address.substring(0, 20)}...\`
 
-Monto: ${group.group_amount} USDC 💵
+Monto: ${formatWithCop(group.group_amount, session.trm || 4250)}
 
 ¿Enviar ahora?`,
                 buttons: [
@@ -1615,7 +1614,7 @@ Monto: ${group.group_amount} USDC 💵
 
 Para: \`${session.to.substring(0, 20)}...\`
 
-Monto: ${session.amount} USDC 💵
+Monto: ${formatWithCop(session.amount, session.trm || 4250)}
 
 ¿Enviar ahora?`,
                 buttons: [
@@ -2284,7 +2283,7 @@ Ejemplos:
 
 Para: \`${session.to.substring(0, 20)}...\`
 
-Monto: ${session.amount} ${assetName} ${assetIcon}
+Monto: ${formatWithCop(session.amount, session.trm || 4250)}
 ${memo ? `Memo: ${memo}` : ''}
 
 ¿Enviar ahora?`,
@@ -2384,9 +2383,10 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
         // Si venía de un pago por voz
         if (session.pendingAction === "PAY_GROUP") {
             const amount = session.pendingGroupPay?.amount || selectedGroup.group_amount;
+            const trm = session.trm || 4250;
             await sendWhatsAppButtons(from, {
                 header: `💸 Pagar grupo: ${selectedGroup.name}`,
-                body: `Monto: $${Number(amount).toLocaleString("es-CO")}\nAporte mensual: $${Number(selectedGroup.group_amount).toLocaleString("es-CO")}`,
+                body: `Monto: ${formatWithCop(Number(amount), trm)}\nAporte mensual: ${formatWithCop(Number(selectedGroup.group_amount), trm)}`,
                 buttons: [
                     { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
                     { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
@@ -2412,7 +2412,8 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
             groupId: selectedGroup.id
         });
 
-        await openGroupDetail(from, phoneNumberId, selectedGroup, from);
+        const trm = session.trm || 4250;
+        await openGroupDetail(from, phoneNumberId, selectedGroup, from, trm);
         return;
     }
     // data.text is already a string in your normalized object
@@ -2892,7 +2893,8 @@ For PAY_GROUP:
             
             // Si no se encontró grupo y hay múltiples
             if (!targetGroup && groups.length > 1) {
-                const groupOptions = groups.map((g, i) => `${i + 1}. ${g.name} - $${Number(g.group_amount).toLocaleString("es-CO")}`).join("\n");
+                const trm = session.trm || 4250;
+                const groupOptions = groups.map((g, i) => `${i + 1}. ${g.name} - ${formatWithCop(Number(g.group_amount), trm)}`).join("\n");
                 await sendWhatsAppText(from, `¿A qué grupo querés pagar?\n\n${groupOptions}\n\nRespondé con el número.`);
                 updateSession(from, {
                     step: "WAITING_GROUP_SELECTION",
@@ -2909,9 +2911,10 @@ For PAY_GROUP:
             
             // Confirmar pago al grupo
             const amount = parsed.amount || targetGroup.group_amount;
+            const trm = session.trm || 4250;
             await sendWhatsAppButtons(from, {
                 header: `💸 Pagar grupo: ${targetGroup.name}`,
-                body: `Monto: $${Number(amount).toLocaleString("es-CO")}\nAporte mensual: $${Number(targetGroup.group_amount).toLocaleString("es-CO")}`,
+                body: `Monto: ${formatWithCop(Number(amount), trm)}\nAporte mensual: ${formatWithCop(Number(targetGroup.group_amount), trm)}`,
                 buttons: [
                     { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
                     { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
