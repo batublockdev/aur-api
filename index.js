@@ -739,39 +739,22 @@ function buildGroupReportText(group, trm = 4250) {
         }).join("\n");
     }
 
-    // Construir texto de miembros
+    // Construir texto de miembros (simplificado para ahorrar espacio)
     let membersText = "";
     membersWithStatus.forEach(m => {
         const lastDate = m.lastPayment 
             ? m.lastPayment.toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" })
             : "-";
-        membersText += `
-${m.index}. ${m.phoneid} ${m.statusEmoji}
-   💵 Aportado: ${formatWithCop(m.paid, trm)}
-   📅 Último: ${lastDate}
-   ⏰ Estado: ${m.status}`;
+        membersText += `${m.index}. ${m.statusEmoji} ${formatWithCop(m.paid, trm)} (${m.status})\n`;
     });
 
-    return `📊 *Informe del Grupo: ${group.name}*
+    return `📊 *${group.name}*
 
-━━━━━━━━━━━━━━━━━
-💰 RESUMEN FINANCIERO
-━━━━━━━━━━━━━━━━━
+💰 Total: ${formatWithCop(totalCollected, trm)}
 
-💵 Total ahorrado: ${formatWithCop(totalCollected, trm)}
-🏦 Balance en cuenta: ${formatWithCop(totalCollected, trm)}
-💸 Total prestado: $0 USD
-📈 Intereses generados: $0 USD
-
-━━━━━━━━━━━━━━━━━
-👥 ESTADO DE MIEMBROS (${members.length})
-━━━━━━━━━━━━━━━━━
+👥 *Miembros (${members.length})*
 ${membersText}
-
-━━━━━━━━━━━━━━━━━
-📝 ÚLTIMOS MOVIMIENTOS
-━━━━━━━━━━━━━━━━━
-
+📝 Últimos movimientos:
 ${movementsText}`;
 }
 
