@@ -1186,12 +1186,17 @@ Un asesor de AUR te responderá lo antes posible.`,
 
         case "GROUP_REPORT": {
             // 📊 Informe detallado del grupo
+            console.log("📊 GROUP_REPORT handler called");
+            console.log("Session groupId:", session.groupId);
+            console.log("GroupsCache:", session.groupsCache?.map(g => ({ id: g.id, name: g.name })));
             group = session.groupsCache?.find(g => g.id === session.groupId);
+            console.log("Found group:", group?.name);
             if (!group) {
                 await sendWhatsAppText(from, "⚠️ No se encontró el grupo. Intenta de nuevo.", phoneNumberId);
                 break;
             }
             const reportText = buildGroupReportText(group);
+            console.log("Report text generated, length:", reportText.length);
             await sendMenu({
                 to: from,
                 phoneNumberId,
@@ -1201,6 +1206,7 @@ Un asesor de AUR te responderá lo antes posible.`,
                     { id: "GROUPS_HOME", title: "⬅️ Volver" }
                 ]
             });
+            console.log("✅ GROUP_REPORT menu sent");
             break;
         }
 
