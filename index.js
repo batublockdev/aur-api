@@ -41,6 +41,29 @@ async function getUsdToCop(usd) {
     console.log(`$${usd} USD is approximately ₱${result.toFixed(2)} COP`);
     return result;
 }
+
+async function getTrm() {
+    try {
+        const res = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
+        const data = await res.json();
+        console.log("📊 TRM obtenida:", data.rates.COP);
+        return data.rates.COP;
+    } catch (err) {
+        console.error("❌ Error obteniendo TRM:", err);
+        return 4250; // fallback aproximado
+    }
+}
+
+function formatWithCop(usdAmount, trm) {
+    const usd = Number(usdAmount) || 0;
+    const cop = usd * trm;
+    const copFormatted = Math.round(cop).toLocaleString("es-CO");
+    
+    if (usd === 0) return "$0 USD";
+    if (usd < 0.01) return `$${usd.toFixed(4)} USD`;
+    return `$${usd.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD (~$${copFormatted} COP)`;
+}
+
 function formatCOP(value) {
     return new Intl.NumberFormat("es-CO", {
         style: "currency",
@@ -644,7 +667,7 @@ async function openGroupDetail(to, phoneNumberId, group, currentUserPhoneId) {
         buttons,
     });
 }
-function buildGroupReportText(group) {
+function buildGroupReportText(group, trm = 4250) {
     const members = group.members || [];
     const payments = group.payments || [];
     const totalCollected = Number(group.total_amount_collected) || 0;
@@ -711,7 +734,7 @@ function buildGroupReportText(group) {
         movementsText = recentPayments.map(p => {
             const member = members.find(m => m.phoneid === p.user_phoneid);
             const date = new Date(p.created_at).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" });
-            return `• ${member?.phoneid || "Usuario"} - $${Number(p.amount).toLocaleString("es-CO")} (${date})`;
+            return `• ${member?.phoneid || "Usuario"} - ${formatWithCop(Number(p.amount), trm)} (${date})`;
         }).join("\n");
     }
 
@@ -723,7 +746,7 @@ function buildGroupReportText(group) {
             : "-";
         membersText += `
 ${m.index}. ${m.phoneid} ${m.statusEmoji}
-   💵 Aportado: $${m.paid.toLocaleString("es-CO")}
+   💵 Aportado: ${formatWithCop(m.paid, trm)}
    📅 Último: ${lastDate}
    ⏰ Estado: ${m.status}`;
     });
@@ -734,10 +757,10 @@ ${m.index}. ${m.phoneid} ${m.statusEmoji}
 💰 RESUMEN FINANCIERO
 ━━━━━━━━━━━━━━━━━
 
-💵 Total ahorrado: $${totalCollected.toLocaleString("es-CO")}
-🏦 Balance en cuenta: $${totalCollected.toLocaleString("es-CO")}
-💸 Total prestado: $0
-📈 Intereses generados: $0
+💵 Total ahorrado: ${formatWithCop(totalCollected, trm)}
+🏦 Balance en cuenta: ${formatWithCop(totalCollected, trm)}
+💸 Total prestado: $0 USD
+📈 Intereses generados: $0 USD
 
 ━━━━━━━━━━━━━━━━━
 👥 ESTADO DE MIEMBROS (${members.length})
@@ -1202,7 +1225,8 @@ Un asesor de AUR te responderá lo antes posible.`,
                 await sendWhatsAppText(from, "⚠️ No se encontró el grupo. Intenta de nuevo.", phoneNumberId);
                 break;
             }
-            const reportText = buildGroupReportText(group);
+            const trm = session.trm || 4250;
+            const reportText = buildGroupReportText(group, trm);
             console.log("Report text generated, length:", reportText.length);
             await sendMenu({
                 to: from,
@@ -1246,6 +1270,7 @@ Un asesor de AUR te responderá lo antes posible.`,
             }
             const allPayments = group.payments || [];
             const members = group.members || [];
+            const trm = session.trm || 4250;
             
             let movementsText = "📋 *Todos los movimientos*\n\n";
             if (allPayments.length === 0) {
@@ -1258,7 +1283,7 @@ Un asesor de AUR te responderá lo antes posible.`,
                         month: "2-digit", 
                         year: "numeric" 
                     });
-                    movementsText += `• ${member?.phoneid || "Usuario"} - $${Number(p.amount).toLocaleString("es-CO")} (${date})\n`;
+                    movementsText += `• ${member?.phoneid || "Usuario"} - ${formatWithCop(Number(p.amount), trm)} (${date})\n`;
                 });
             }
             
@@ -1993,6 +2018,9 @@ async function handleText({ from, text, phoneNumberId }) {
 
         await sendWhatsAppText(from, "⏳ Actualizando tu saldo...", phoneNumberId);
 
+        // Obtener TRM y guardarla en session
+        const trm = await getTrm();
+        
         const { amountxlm, amountusdc, address } = await UserBalance(session?.address);
         // Enviar explicación de la dirección
         await sendWhatsAppText(from, `📱 *Tu dirección para recibir*\n\nDale esta dirección a quien te quiera enviar dinero:\n\n📎 Copia y pega:`, phoneNumberId);
@@ -2000,7 +2028,7 @@ async function handleText({ from, text, phoneNumberId }) {
         await sendWhatsAppText(from, address, phoneNumberId);
         // Enviar el menú
         await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amountxlm, amountusdc });
-        updateSession(from, { step: null, to: null, amount: null, reason: null, multisigTransaction: null }); // reset any ongoing steps
+        updateSession(from, { step: null, to: null, amount: null, reason: null, multisigTransaction: null, trm }); // reset any ongoing steps + guardar TRM
         return;
     }
 
