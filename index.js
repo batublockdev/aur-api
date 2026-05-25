@@ -137,6 +137,7 @@ const MENUS = {
 
 ⚡ XLM: {amountxlm}
 💵 USDC: {amountusdc}
+📊 TRM: 1 USD ≈ $4,250 COP
 
 ¿Qué quieres hacer?`,
         buttons: [
@@ -1913,7 +1914,7 @@ async function createAccount(
 
 }
 
-function formatGroupsList(name, groups) {
+function formatGroupsList(name, groups, trm = 4250) {
     if (!groups.length) {
         return `Hola ${name} 👋
 
@@ -1930,7 +1931,7 @@ Tus grupos de ahorro:
 \n`;
 
     groups.forEach((g, i) => {
-        const amount = g.group_amount > 0 ? `$${g.group_amount}` : "Flexible";
+        const amount = g.group_amount > 0 ? formatWithCop(Number(g.group_amount), trm) : "Flexible";
         const interval = g.payment_interval_days === 7 ? "semana" : 
                         g.payment_interval_days === 15 ? "quincena" :
                         g.payment_interval_days === 30 ? "mes" : `${g.payment_interval_days} días`;
@@ -1960,7 +1961,8 @@ async function handleMainGroups(phone, phoneNumberId) {
 
     const message = formatGroupsList(
         session?.name || "amigo",
-        groups
+        groups,
+        session?.trm || 4250
     );
 
     await sendWhatsAppText(phone, message, phoneNumberId);
@@ -2027,6 +2029,8 @@ async function handleText({ from, text, phoneNumberId }) {
         await sendWhatsAppText(from, address, phoneNumberId);
         // Enviar el menú
         await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amountxlm, amountusdc });
+        // Enviar TRM actualizada
+        await sendWhatsAppText(from, `📊 *TRM Hoy*\n\n1 USD ≈ $${Math.round(trm).toLocaleString("es-CO")} COP`, phoneNumberId);
         updateSession(from, { step: null, to: null, amount: null, reason: null, multisigTransaction: null, trm }); // reset any ongoing steps + guardar TRM
         return;
     }
