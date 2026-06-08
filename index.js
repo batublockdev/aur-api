@@ -128,21 +128,29 @@ const GREETINGS = [
 ];
 let name = "";
 let amount = "₱0";
+
+// Helper para formatear saldo en USD y COP
+function formatSaldo(usdc, trm) {
+    const usd = Number(usdc) || 0;
+    const cop = Math.round(usd * trm).toLocaleString("es-CO");
+    if (usd === 0) return "$0 USD ($0 COP)";
+    if (usd < 0.01) return `$${usd.toFixed(4)} USD ($${cop} COP)`;
+    return `$${usd.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD ($${cop} COP)`;
+}
+
 const MENUS = {
     ONBOARDING: {
         text:
             `Hola {name} 👋
 
-💼 *Tu saldo:*
+💼 *Saldo personal:*
 
-⚡ XLM: {amountxlm}
-💵 USDC: {amountusdc}
-📊 TRM: 1 USD ≈ $4,250 COP
+💵 {saldo}
 
 ¿Qué quieres hacer?`,
         buttons: [
-            { id: "MAIN_MONEY", title: "💰 Mi platica" },
             { id: "MAIN_GROUPS", title: "👥 Mis grupos" },
+            { id: "MONEY_SEND", title: "📤 Enviar dinero" },
             { id: "MAIN_HELP", title: "ℹ️ Ayuda" },
         ],
     },
@@ -241,8 +249,8 @@ Tu código de invitación está guardado 👍`,
 MENUS.MAIN = {
     text: `Hola {name} ¿Que mas? \n\n¿Qué vamos a hacer hoy?`,
     buttons: [
-        { id: "MAIN_MONEY", title: "💰 Mi platica" },
         { id: "MAIN_GROUPS", title: "👥 Mis grupos" },
+        { id: "MONEY_SEND", title: "📤 Enviar dinero" },
         { id: "MAIN_HELP", title: "ℹ️ Ayuda" },
     ],
 };
@@ -255,8 +263,8 @@ Desde aquí podrás ver tus grupos, hacer aportes y llevar el control de tus pag
 
 \n\n¿Qué vamos a hacer hoy?`,
     buttons: [
-        { id: "MAIN_MONEY", title: "💰 Mi platica" },
         { id: "MAIN_GROUPS", title: "👥 Mis grupos" },
+        { id: "MONEY_SEND", title: "📤 Enviar dinero" },
         { id: "MAIN_HELP", title: "ℹ️ Ayuda" },
     ],
 };
@@ -352,14 +360,6 @@ Paso 4 de 4
 
 MENUS.ONBOARDING_COMPLETE = {
     text: `🎉 *¡Listo, {name}!*\n\nYa estás en lista de espera.\n\nEn breve nos comunicamos contigo para avanzar con tu grupo de ahorro.\n\n📧 Te escribiremos a: {email}\n\n¡Gracias por confiar en AUR! 💚`,
-};
-MENUS.MAIN = {
-    text: `Hola {name} ¿Que mas? \n\n¿Qué vamos a hacer hoy?`,
-    buttons: [
-        { id: "MAIN_MONEY", title: "💰 Mi platica" },
-        { id: "MAIN_GROUPS", title: "👥 Mis grupos" },
-        { id: "MAIN_HELP", title: "ℹ️ Ayuda" },
-    ],
 };
 MENUS.GROUPS_HOME = {
     text: `👥 Mis grupos
@@ -1153,7 +1153,7 @@ Ejemplo:
             await showMenu("HELP", from, phoneNumberId);
             break;
         case "MAIN_MONEY":
-            await sendWhatsAppText(from, "⏳ Actualizando tu saldo...", phoneNumberId);
+            await sendWhatsAppText(from, "⏳ Cargando...", phoneNumberId);
             const { amountxlm: xlmBal, amountusdc: usdcBal, address: userAddr } = await UserBalance(session.address);
             // Enviar explicación de la dirección
             await sendWhatsAppText(from, `📱 *Tu dirección de wallet*
@@ -2002,18 +2002,22 @@ async function handleText({ from, text, phoneNumberId }) {
 
     if (isGreeting || isMenu) {
 
-        await sendWhatsAppText(from, "⏳ Actualizando tu saldo...", phoneNumberId);
+        await sendWhatsAppText(from, "⏳ Cargando...", phoneNumberId);
 
         // Obtener TRM y guardarla en session
         const trm = await getTrm();
         
         const { amountxlm, amountusdc, address } = await UserBalance(session?.address);
+        
+        // Formatear saldo en USD y COP
+        const saldo = formatSaldo(amountusdc, trm);
+        
         // Enviar explicación de la dirección
         await sendWhatsAppText(from, `📱 *Tu dirección para recibir*\n\nDale esta dirección a quien te quiera enviar dinero:\n\n📎 Copia y pega:`, phoneNumberId);
         // Enviar la dirección sola
         await sendWhatsAppText(from, address, phoneNumberId);
         // Enviar el menú
-        await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", amountxlm, amountusdc });
+        await showMenu("ONBOARDING", from, phoneNumberId, { name: session?.name || "Amigo", saldo });
         // Enviar TRM actualizada
         await sendWhatsAppText(from, `📊 *TRM Hoy*\n\n1 USD ≈ $${Math.round(trm).toLocaleString("es-CO")} COP`, phoneNumberId);
         updateSession(from, { step: null, to: null, amount: null, reason: null, multisigTransaction: null, trm }); // reset any ongoing steps + guardar TRM
