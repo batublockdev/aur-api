@@ -1076,26 +1076,21 @@ Ahorro familia`,
             );
             break;
         case "MONEY_SEND":
-            updateSession(from, {
-                step: "SEND_CHOOSE_METHOD"
-            });
+            // Obtener saldo primero
+            const moneySendBalance = await UserBalance(session?.address);
+            const trmMoneySend = session?.trm || 4250;
+            
+            await sendWhatsAppText(
+                from,
+                `📤 *Enviar dinero*
 
-            await sendMenu({
-                to: from,
-                phoneNumberId,
-                text: `📤 *Enviar dinero*
+✏️ Escribe la dirección Stellar del destinatario
 
-¿A quién quieres enviar?
-
-💡 Escribe la dirección Stellar o responde con el número:
-
-1️⃣ Escribir dirección
-2️⃣ Pegar dirección`,
-                buttons: [
-                    { id: "SEND_TEXT", title: "✍️ Escribir" },
-                    { id: "MENU_BACK", title: "⬅️ Volver" },
-                ],
-            });
+💡 Tu saldo disponible:
+💵 ${formatSaldo(moneySendBalance.amountusdc, trmMoneySend)}`,
+                phoneNumberId
+            );
+            updateSession(from, { step: "SEND_WAITING_ADDRESS" });
             break;
         case "CREATE_GASTO":
 
@@ -1137,15 +1132,6 @@ O pega la dirección Stellar si el destinatario no está en la lista`, phoneNumb
 
 Ejemplo:
 "Enviar 20 a Juan"`,
-                phoneNumberId
-            );
-            break;
-        case "SEND_TEXT":
-            updateSession(from, { step: "SEND_WAITING_ADDRESS" });
-
-            await sendWhatsAppText(
-                from,
-                `✏️ Escribe la dirección del destinatario`,
                 phoneNumberId
             );
             break;
@@ -2084,14 +2070,14 @@ async function handleText({ from, text, phoneNumberId }) {
 
         // Obtener saldo real
         const sendBalance = await UserBalance(session.address);
+        const sendTrm = session.trm || 4250;
 
         await sendWhatsAppText(
             from,
             `💰 *¿Cuánto quieres enviar?*
 
 Tu saldo disponible:
-💵 USDC: ${sendBalance.amountusdc}
-⚡ XLM: ${sendBalance.amountxlm}
+💵 ${formatSaldo(sendBalance.amountusdc, sendTrm)}
 
 💡 Escribe el monto en números:
 Ejemplo: 25`,
@@ -2228,6 +2214,25 @@ Recibes: ~${destMin} ${session.swapTo} ${toIcon}
             await sendWhatsAppText(
                 from,
                 "⚠️ Escribe un monto válido.",
+                phoneNumberId
+            );
+            return;
+        }
+
+        // Verificar balance antes de continuar
+        const balanceCheck = await UserBalance(session.address);
+        const availableUsdc = Number(balanceCheck.amountusdc) || 0;
+        
+        if (amount > availableUsdc) {
+            const trmCheck = session.trm || 4250;
+            await sendWhatsAppText(
+                from,
+                `⚠️ *Saldo insuficiente*
+
+Quieres enviar: $${amount} USD
+Tu saldo: ${formatSaldo(availableUsdc, trmCheck)}
+
+💡 Intenta con un monto menor.`,
                 phoneNumberId
             );
             return;
