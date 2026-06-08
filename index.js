@@ -64,6 +64,17 @@ function formatWithCop(usdAmount, trm) {
     return `$${usd.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD (~$${copFormatted} COP)`;
 }
 
+// Formatear monto en COP mostrando también USD (para aportes de grupo)
+function formatCOPtoUSD(copAmount, trm) {
+    const cop = Number(copAmount) || 0;
+    const usd = cop / trm;
+    const copFormatted = Math.round(cop).toLocaleString("es-CO");
+    
+    if (cop === 0) return "$0 COP";
+    if (usd < 0.01) return `$${copFormatted} COP (~$${usd.toFixed(4)} USD)`;
+    return `$${copFormatted} COP (~$${usd.toFixed(2)} USD)`;
+}
+
 function formatCOP(value) {
     return new Intl.NumberFormat("es-CO", {
         style: "currency",
@@ -618,7 +629,7 @@ async function openGroupDetail(to, phoneNumberId, group, currentUserPhoneId, trm
     // ── Texto base común ─────────────────────────────────────────────────────
     let text = `👥 *${group.name}*\n\n`;
 
-    text += `💰 Aporte individual: ${formatWithCop(Number(group.group_amount), trm)}\n`;
+    text += `💰 Aporte individual: ${formatCOPtoUSD(Number(group.group_amount), trm)}\n`;
     text += `📅 Frecuencia: Cada ${group.payment_interval_days} días\n`;
     text += `🟢 Estado: ${isActive ? "Activo" : "Pendiente de creación"}\n\n`;
 
@@ -1435,7 +1446,6 @@ Ejemplo: 10`,
             });
             break;
         case "GROUP_CONTRIBUTE":
-            //const balance = await UserBalance(session.address);
             group = session.groupsCache.find(g => g.id === session.groupId);
 
             if (!group) {
@@ -1443,20 +1453,48 @@ Ejemplo: 10`,
                 return;
             }
 
+            // Obtener balance del usuario
+            const contributeBalance = await UserBalance(session.address);
+            const contributeTrm = session.trm || 4250;
+            const groupAmountCop = Number(group.group_amount) || 0;
+            
+            // Convertir COP a USD
+            const groupAmountUsd = groupAmountCop / contributeTrm;
+            const availableUsd = Number(contributeBalance.amountusdc) || 0;
+            
+            // Verificar si hay suficiente balance
+            if (groupAmountUsd > availableUsd) {
+                await sendWhatsAppText(
+                    from,
+                    `⚠️ *Saldo insuficiente*
+
+Aporte del grupo: $${groupAmountCop.toLocaleString("es-CO")} COP
+(~$${groupAmountUsd.toFixed(2)} USD)
+
+Tu saldo: ${formatSaldo(availableUsd, contributeTrm)}
+
+💡 Necesitas más USDC para aportar a este grupo.`,
+                    phoneNumberId
+                );
+                return;
+            }
+
             console.log("Grupo activo:", group);
             updateSession(from, {
                 to: group.multisig_address,
-                amount: group.group_amount,
+                amount: groupAmountUsd.toFixed(7), // Guardar en USD para enviar a Stellar
+                amountCop: groupAmountCop, // Guardar COP original para mostrar
             });
 
             await sendMenu({
                 to: from,
                 phoneNumberId,
-                text: `✨ *Confirmar envío*
+                text: `✨ *Confirmar aporte*
 
 Para: \`${group.multisig_address.substring(0, 20)}...\`
 
-Monto: ${formatWithCop(group.group_amount, session.trm || 4250)}
+Monto: $${groupAmountCop.toLocaleString("es-CO")} COP
+(~$${groupAmountUsd.toFixed(2)} USD)
 
 ¿Enviar ahora?`,
                 buttons: [
@@ -1902,7 +1940,7 @@ Tus grupos de ahorro:
 \n`;
 
     groups.forEach((g, i) => {
-        const amount = g.group_amount > 0 ? formatWithCop(Number(g.group_amount), trm) : "Flexible";
+        const amount = g.group_amount > 0 ? formatCOPtoUSD(Number(g.group_amount), trm) : "Flexible";
         const interval = g.payment_interval_days === 7 ? "semana" : 
                         g.payment_interval_days === 15 ? "quincena" :
                         g.payment_interval_days === 30 ? "mes" : `${g.payment_interval_days} días`;
@@ -2384,7 +2422,7 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
             const trm = session.trm || 4250;
             await sendWhatsAppButtons(from, {
                 header: `💸 Pagar grupo: ${selectedGroup.name}`,
-                body: `Monto: ${formatWithCop(Number(amount), trm)}\nAporte mensual: ${formatWithCop(Number(selectedGroup.group_amount), trm)}`,
+                body: `Monto: ${formatCOPtoUSD(Number(amount), trm)}\nAporte mensual: ${formatCOPtoUSD(Number(selectedGroup.group_amount), trm)}`,
                 buttons: [
                     { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
                     { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
@@ -2828,7 +2866,7 @@ async function handleVoice(mediaId, from) {
         // Obtener grupos del usuario para contexto de pago
         const groups = await getUserGroups(from);
         const groupsText = groups.length > 0
-            ? groups.map(g => `- ${g.name} (aporte: $${Number(g.group_amount).toLocaleString("es-CO")})`).join("\n")
+            ? groups.map(g => `- ${g.name} (aporte: ${formatCOPtoUSD(Number(g.group_amount), trm)})`).join("\n")
             : "No tiene grupos";
 
         const result = await model.generateContent([
@@ -2892,7 +2930,7 @@ For PAY_GROUP:
             // Si no se encontró grupo y hay múltiples
             if (!targetGroup && groups.length > 1) {
                 const trm = session.trm || 4250;
-                const groupOptions = groups.map((g, i) => `${i + 1}. ${g.name} - ${formatWithCop(Number(g.group_amount), trm)}`).join("\n");
+                const groupOptions = groups.map((g, i) => `${i + 1}. ${g.name} - ${formatCOPtoUSD(Number(g.group_amount), trm)}`).join("\n");
                 await sendWhatsAppText(from, `¿A qué grupo querés pagar?\n\n${groupOptions}\n\nRespondé con el número.`);
                 updateSession(from, {
                     step: "WAITING_GROUP_SELECTION",
@@ -2912,7 +2950,7 @@ For PAY_GROUP:
             const trm = session.trm || 4250;
             await sendWhatsAppButtons(from, {
                 header: `💸 Pagar grupo: ${targetGroup.name}`,
-                body: `Monto: ${formatWithCop(Number(amount), trm)}\nAporte mensual: ${formatWithCop(Number(targetGroup.group_amount), trm)}`,
+                body: `Monto: ${formatCOPtoUSD(Number(amount), trm)}\nAporte mensual: ${formatCOPtoUSD(Number(targetGroup.group_amount), trm)}`,
                 buttons: [
                     { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
                     { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
