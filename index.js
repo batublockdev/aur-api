@@ -2416,13 +2416,30 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
 
         const selectedGroup = session.groupsCache[index];
 
-        // Si venía de un pago por voz
-        if (session.pendingAction === "PAY_GROUP") {
+        const trm = session.trm || 4250;
+        const pendingAction = session.pendingAction;
+
+        if (pendingAction === "PAY_GROUP") {
             const amount = session.pendingGroupPay?.amount || selectedGroup.group_amount;
-            const trm = session.trm || 4250;
+            const groupAmountCop = Number(selectedGroup.group_amount) || 0;
+            const groupAmountUsd = groupAmountCop / trm;
+
+            // Verificar saldo
+            const user = await getUser(from);
+            if (user?.address) {
+                const balance = await UserBalance(user.address);
+                const availableUsd = Number(balance.amountusdc) || 0;
+                if (groupAmountUsd > availableUsd) {
+                    await sendWhatsAppText(from,
+                        `⚠️ *Saldo insuficiente*\n\nAporte: ${formatCOPtoUSD(groupAmountCop, trm)}\nTu saldo: ${formatSaldo(availableUsd, trm)}\n\nNecesitas más USDC para aportar a este grupo.`);
+                    updateSession(from, { step: null, pendingAction: null });
+                    return;
+                }
+            }
+
             await sendWhatsAppButtons(from, {
                 header: `💸 Pagar grupo: ${selectedGroup.name}`,
-                body: `Monto: ${formatCOPtoUSD(Number(amount), trm)}\nAporte mensual: ${formatCOPtoUSD(Number(selectedGroup.group_amount), trm)}`,
+                body: `Monto: ${formatCOPtoUSD(Number(selectedGroup.group_amount), trm)}\nPara: ${selectedGroup.multisig_address?.substring(0, 15) || 'N/A'}...\n\n¿Confirmar pago?`,
                 buttons: [
                     { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
                     { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
@@ -2435,20 +2452,47 @@ Si escribes el numero 0 el grupo no tendrá monto fijo.`,
                 multisigTransaction: true,
                 groupId: selectedGroup.id,
                 to: selectedGroup.multisig_address,
-                amount: amount,
+                amount: groupAmountUsd.toFixed(7),
                 groupsCache: session.groupsCache,
-                groupMembers: selectedGroup.members
+                groupMembers: selectedGroup.members,
+                name: user?.name || session.name,
+                phone: from,
+                address: user?.address,
+                tokennotification: user?.tokennotification,
             });
             return;
         }
 
-        // Comportamiento anterior: ver detalles del grupo
+        if (pendingAction === "WHO_PAID") {
+            updateSession(from, { step: null, pendingAction: null });
+            await getVoiceWhoPaid(from, session, { groupName: selectedGroup.name }, session.groupsCache);
+            return;
+        }
+
+        if (pendingAction === "GROUP_STATUS") {
+            updateSession(from, { step: null, pendingAction: null });
+            await getVoiceGroupStatus(from, session, { groupName: selectedGroup.name }, session.groupsCache);
+            return;
+        }
+
+        if (pendingAction === "GROUP_DEBT") {
+            updateSession(from, { step: null, pendingAction: null });
+            await getVoiceGroupDebt(from, session, { groupName: selectedGroup.name }, session.groupsCache);
+            return;
+        }
+
+        if (pendingAction === "INVITE") {
+            updateSession(from, { step: null, pendingAction: null });
+            await getVoiceInvite(from, session, { groupName: selectedGroup.name }, session.groupsCache);
+            return;
+        }
+
+        // Comportamiento por defecto: ver detalles del grupo
         updateSession(from, {
             step: "VIEWING_GROUP",
             groupId: selectedGroup.id
         });
 
-        const trm = session.trm || 4250;
         await openGroupDetail(from, phoneNumberId, selectedGroup, from, trm);
         return;
     }
@@ -2827,6 +2871,345 @@ async function sendWhatsAppButtons(to, { header, body, buttons }) {
     );
 }
 
+// ========== VOICE INTENT HELPERS ==========
+
+async function getVoiceBalance(from, session) {
+    if (!session?.address) {
+        return sendWhatsAppText(from, "⚠️ No tengo tu dirección de wallet. Regístrate primero en AUR.");
+    }
+    const trm = await getTrm();
+    const balance = await UserBalance(session.address);
+    const usd = Number(balance.amountusdc) || 0;
+    const xlm = Number(balance.amountxlm) || 0;
+    const cop = Math.round(usd * trm).toLocaleString("es-CO");
+    let msg = `💼 *Tu saldo*\n\n💵 USDC: $${usd.toFixed(2)} USD (~$${cop} COP)\n⚡ XLM: ${xlm.toFixed(2)} XLM`;
+    if (usd === 0 && xlm === 0) msg += "\n\nTu cuenta no tiene fondos todavía.";
+    await sendWhatsAppText(from, msg);
+}
+
+async function getVoiceWhoPaid(from, session, parsed, groups) {
+    let targetGroup = null;
+    if (parsed.groupName) {
+        targetGroup = groups.find(g =>
+            g.name.toLowerCase().includes(parsed.groupName.toLowerCase()) ||
+            parsed.groupName.toLowerCase().includes(g.name.toLowerCase())
+        );
+    }
+    if (!targetGroup && groups.length === 1) targetGroup = groups[0];
+    if (!targetGroup && groups.length === 0) {
+        return sendWhatsAppText(from, "❌ No tienes grupos activos.");
+    }
+    if (!targetGroup && groups.length > 1) {
+        const opts = groups.map((g, i) => `${i + 1}. ${g.name}`).join("\n");
+        await sendWhatsAppText(from, `¿De qué grupo quieres ver los pagos?\n\n${opts}\n\nResponde con el número.`);
+        updateSession(from, { step: "WAITING_GROUP_SELECTION", pendingAction: "WHO_PAID", groupsCache: groups });
+        return;
+    }
+
+    const trm = session.trm || 4250;
+    const members = targetGroup.members || [];
+    const payments = targetGroup.payments || [];
+    const groupAmount = Number(targetGroup.group_amount) || 0;
+
+    // Agrupar pagos por miembro
+    const paidByMember = {};
+    payments.forEach(p => {
+        if (p.status === "SUCCESS") {
+            if (!paidByMember[p.user_phoneid]) paidByMember[p.user_phoneid] = { total: 0, count: 0, lastDate: null };
+            paidByMember[p.user_phoneid].total += Number(p.amount) || 0;
+            paidByMember[p.user_phoneid].count++;
+            const d = new Date(p.created_at);
+            if (!paidByMember[p.user_phoneid].lastDate || d > paidByMember[p.user_phoneid].lastDate) {
+                paidByMember[p.user_phoneid].lastDate = d;
+            }
+        }
+    });
+
+    let text = `📊 *${targetGroup.name}*\n\n`;
+    let paidCount = 0;
+    let pendingCount = 0;
+
+    members.forEach(m => {
+        const paid = paidByMember[m.phoneid];
+        if (paid && paid.total > 0) {
+            paidCount++;
+            const lastDate = paid.lastDate.toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit" });
+            text += `✅ ${m.phoneid}\n   ${formatWithCop(paid.total, trm)} | ${paid.count} pago(s) | Último: ${lastDate}\n`;
+        } else {
+            pendingCount++;
+            text += `❌ ${m.phoneid}\n   Sin pagos registrados\n`;
+        }
+    });
+
+    text += `\n💰 Total ahorrado: ${formatWithCop(Number(targetGroup.total_amount_collected || 0), trm)}\n`;
+    text += `✅ ${paidCount} pagaron | ❌ ${pendingCount} pendientes`;
+
+    await sendWhatsAppText(from, text);
+}
+
+async function getVoiceGroupStatus(from, session, parsed, groups) {
+    let targetGroup = null;
+    if (parsed.groupName) {
+        targetGroup = groups.find(g =>
+            g.name.toLowerCase().includes(parsed.groupName.toLowerCase()) ||
+            parsed.groupName.toLowerCase().includes(g.name.toLowerCase())
+        );
+    }
+    if (!targetGroup && groups.length === 1) targetGroup = groups[0];
+    if (!targetGroup && groups.length === 0) {
+        return sendWhatsAppText(from, "❌ No tienes grupos activos.");
+    }
+    if (!targetGroup && groups.length > 1) {
+        const opts = groups.map((g, i) => `${i + 1}. ${g.name}`).join("\n");
+        await sendWhatsAppText(from, `¿De qué grupo quieres ver el estado?\n\n${opts}\n\nResponde con el número.`);
+        updateSession(from, { step: "WAITING_GROUP_SELECTION", pendingAction: "GROUP_STATUS", groupsCache: groups });
+        return;
+    }
+
+    const trm = session.trm || 4250;
+    const members = targetGroup.members || [];
+    const payments = targetGroup.payments || [];
+    const totalCollected = Number(targetGroup.total_amount_collected) || 0;
+    const myTotalPaid = Number(targetGroup.my_total_paid) || 0;
+    const groupAmount = Number(targetGroup.group_amount) || 0;
+    const interval = targetGroup.payment_interval_days || 30;
+
+    // Calcular cuotas esperadas por miembro
+    let totalExpected = 0;
+    members.forEach(m => {
+        const joinedAt = new Date(m.joined_at || targetGroup.group_created_at);
+        const now = new Date();
+        const daysSince = Math.max(1, Math.floor((now - joinedAt) / (1000 * 60 * 60 * 24)));
+        const expectedPayments = Math.max(1, Math.ceil(daysSince / interval));
+        totalExpected += expectedPayments * groupAmount;
+    });
+
+    const progressPct = totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0;
+
+    let text = `👥 *${targetGroup.name}*\n\n`;
+    text += `💰 Total ahorrado: ${formatWithCop(totalCollected, trm)}\n`;
+    text += `🎯 Aporte por cuota: ${formatCOPtoUSD(groupAmount, trm)}\n`;
+    text += `📅 Frecuencia: Cada ${interval} días\n`;
+    text += `👥 Miembros: ${members.length}\n`;
+    text += `📊 Progreso: ${progressPct}%\n\n`;
+    text += `*Tus aportes:*\n`;
+    text += `✅ Has aportado: ${formatWithCop(myTotalPaid, trm)}\n`;
+
+    // Cuántas cuotas ha pagado
+    if (groupAmount > 0) {
+        const myPaymentsCount = payments.filter(p => p.user_phoneid === from && p.status === "SUCCESS").length;
+        text += `📋 Cuotas pagadas: ${myPaymentsCount}\n`;
+    }
+
+    await sendWhatsAppText(from, text);
+}
+
+async function getVoiceMyGroups(from, session) {
+    const groups = await getUserGroups(from);
+    if (groups.length === 0) {
+        return sendWhatsAppText(from, "📭 No tienes grupos todavía.\n\nEscribe *menu* para crear uno.");
+    }
+    const trm = session.trm || 4250;
+    let text = `👥 *Tus grupos*\n\n`;
+    groups.forEach((g, i) => {
+        const status = g.is_active ? "✅ Activo" : "⏳ Pendiente";
+        const total = Number(g.total_amount_collected) || 0;
+        const myPaid = Number(g.my_total_paid) || 0;
+        text += `${i + 1}️⃣ *${g.name}*\n`;
+        text += `   ${status}\n`;
+        text += `   💰 Ahorrado: ${formatWithCop(total, trm)}\n`;
+        text += `   👤 Tu aporte: ${formatWithCop(myPaid, trm)}\n`;
+        text += `   👥 ${g.members?.length || 0} miembros\n\n`;
+    });
+    await sendWhatsAppText(from, text);
+}
+
+async function getVoiceTxHistory(from, session) {
+    if (!session?.address) {
+        return sendWhatsAppText(from, "⚠️ No tengo tu dirección de wallet.");
+    }
+    const res = await conn.query(`
+        SELECT status, concepto, tx_hash, created_at, network
+        FROM stellar_transactionsx
+        WHERE pubkey = $1
+        ORDER BY created_at DESC
+        LIMIT 5
+    `, [session.address]);
+
+    if (res.rows.length === 0) {
+        return sendWhatsAppText(from, "📭 No tienes transacciones registradas.");
+    }
+
+    let text = `📋 *Últimas transacciones*\n\n`;
+    res.rows.forEach((t, i) => {
+        const date = new Date(t.created_at).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "2-digit" });
+        const emoji = t.status === "SUCCESS" ? "✅" : t.status === "PENDING" ? "⏳" : t.status === "REJECTED" ? "❌" : "⏳";
+        const concept = t.concepto || "Sin concepto";
+        text += `${emoji} ${concept}\n   ${t.status} | ${date}\n`;
+        if (t.tx_hash) {
+            text += `   🔗 stellar.expert/explorer/public/tx/${t.tx_hash.substring(0, 12)}...\n`;
+        }
+        text += "\n";
+    });
+    await sendWhatsAppText(from, text);
+}
+
+async function getVoiceGroupDebt(from, session, parsed, groups) {
+    let targetGroup = null;
+    if (parsed.groupName) {
+        targetGroup = groups.find(g =>
+            g.name.toLowerCase().includes(parsed.groupName.toLowerCase()) ||
+            parsed.groupName.toLowerCase().includes(g.name.toLowerCase())
+        );
+    }
+    if (!targetGroup && groups.length === 1) targetGroup = groups[0];
+    if (!targetGroup && groups.length === 0) {
+        return sendWhatsAppText(from, "❌ No tienes grupos activos.");
+    }
+    if (!targetGroup && groups.length > 1) {
+        const opts = groups.map((g, i) => `${i + 1}. ${g.name}`).join("\n");
+        await sendWhatsAppText(from, `¿De qué grupo quieres ver las deudas?\n\n${opts}\n\nResponde con el número.`);
+        updateSession(from, { step: "WAITING_GROUP_SELECTION", pendingAction: "GROUP_DEBT", groupsCache: groups });
+        return;
+    }
+
+    const trm = session.trm || 4250;
+    const members = targetGroup.members || [];
+    const payments = targetGroup.payments || [];
+    const groupAmount = Number(targetGroup.group_amount) || 0;
+    const interval = targetGroup.payment_interval_days || 30;
+
+    if (groupAmount === 0) {
+        return sendWhatsAppText(from, `📋 *${targetGroup.name}*\n\nEste grupo no tiene un monto fijo de cuota. Los aportes son libres.`);
+    }
+
+    const memberPayments = {};
+    payments.forEach(p => {
+        if (p.status !== "SUCCESS") return;
+        if (!memberPayments[p.user_phoneid]) memberPayments[p.user_phoneid] = { total: 0, count: 0 };
+        memberPayments[p.user_phoneid].total += Number(p.amount) || 0;
+        memberPayments[p.user_phoneid].count++;
+    });
+
+    let text = `📊 *${targetGroup.name}* - Estado de cuotas\n\n`;
+    let alDia = 0;
+    let conDeuda = 0;
+
+    members.forEach(m => {
+        const paid = memberPayments[m.phoneid]?.total || 0;
+        const joinedAt = new Date(m.joined_at || targetGroup.group_created_at);
+        const now = new Date();
+        const daysSince = Math.max(1, Math.floor((now - joinedAt) / (1000 * 60 * 60 * 24)));
+        const expectedPayments = Math.max(1, Math.ceil(daysSince / interval));
+        const expectedTotal = expectedPayments * groupAmount;
+        const debt = expectedTotal - paid;
+
+        if (debt <= 0) {
+            alDia++;
+            text += `✅ ${m.phoneid}\n   ${formatWithCop(paid, trm)} aportado | Al día\n`;
+        } else {
+            conDeuda++;
+            const missedCuotas = Math.floor(debt / groupAmount);
+            text += `⚠️ ${m.phoneid}\n   ${formatWithCop(paid, trm)} aportado | Deuda: ${formatWithCop(debt, trm)} (${missedCuotas} cuota(s))\n`;
+        }
+    });
+
+    text += `\n✅ ${alDia} al día | ⚠️ ${conDeuda} con deuda`;
+    await sendWhatsAppText(from, text);
+}
+
+async function getVoiceSwap(from, session, parsed) {
+    if (!session?.address) {
+        return sendWhatsAppText(from, "⚠️ No tengo tu dirección de wallet.");
+    }
+    const amount = parsed.amount;
+    if (!amount) {
+        return sendWhatsAppText(from, "💱 ¿Cuánto quieres cambiar?\n\nEjemplo: *cambia 50 dólares*");
+    }
+    const direction = parsed.swapDirection || "USDC_XLM"; // default USDC→XLM
+    const balance = await UserBalance(session.address);
+
+    if (direction === "USDC_XLM") {
+        const usdcBal = Number(balance.amountusdc) || 0;
+        if (Number(amount) > usdcBal) {
+            return sendWhatsAppText(from, `⚠️ Saldo insuficiente.\n\nTu saldo: $${usdcBal.toFixed(2)} USDC\nQuerías cambiar: $${amount} USDC`);
+        }
+        await sendWhatsAppButtons(from, {
+            header: `💱 Cambiar dólares a Stellar`,
+            body: `Monto: $${amount} USDC\nRecibirás: XLM equivalente\n\n¿Confirmar cambio?`,
+            buttons: [
+                { id: "SWAP_CONFIRM_YES", title: "✅ Confirmar" },
+                { id: "SWAP_CANCEL", title: "❌ Cancelar" },
+            ],
+        });
+        updateSession(from, {
+            step: "SWAP_WAITING_AMOUNT",
+            swapFrom: "USDC",
+            swapTo: "XLM",
+            swapAmount: amount,
+            destMin: "1",
+            path: [],
+        });
+    } else {
+        const xlmBal = Number(balance.amountxlm) || 0;
+        if (Number(amount) > xlmBal) {
+            return sendWhatsAppText(from, `⚠️ Saldo insuficiente.\n\nTu saldo: ${xlmBal.toFixed(2)} XLM\nQuerías cambiar: ${amount} XLM`);
+        }
+        await sendWhatsAppButtons(from, {
+            header: `💱 Cambiar Stellar a dólares`,
+            body: `Monto: ${amount} XLM\nRecibirás: USDC equivalente\n\n¿Confirmar cambio?`,
+            buttons: [
+                { id: "SWAP_CONFIRM_YES", title: "✅ Confirmar" },
+                { id: "SWAP_CANCEL", title: "❌ Cancelar" },
+            ],
+        });
+        updateSession(from, {
+            step: "SWAP_WAITING_AMOUNT",
+            swapFrom: "XLM",
+            swapTo: "USDC",
+            swapAmount: amount,
+            destMin: "1",
+            path: [],
+        });
+    }
+}
+
+async function getVoiceInvite(from, session, parsed, groups) {
+    let targetGroup = null;
+    if (parsed.groupName) {
+        targetGroup = groups.find(g =>
+            g.name.toLowerCase().includes(parsed.groupName.toLowerCase()) ||
+            parsed.groupName.toLowerCase().includes(g.name.toLowerCase())
+        );
+    }
+    if (!targetGroup && groups.length === 1) targetGroup = groups[0];
+    if (!targetGroup && groups.length === 0) {
+        return sendWhatsAppText(from, "❌ No tienes grupos para invitar.");
+    }
+    if (!targetGroup && groups.length > 1) {
+        const opts = groups.map((g, i) => `${i + 1}. ${g.name}`).join("\n");
+        await sendWhatsAppText(from, `¿A qué grupo quieres invitar?\n\n${opts}\n\nResponde con el número.`);
+        updateSession(from, { step: "WAITING_GROUP_SELECTION", pendingAction: "INVITE", groupsCache: groups });
+        return;
+    }
+
+    const inviteCode = targetGroup.invite_code;
+    const joinText = `QUIERO_UNIRME ${inviteCode}`;
+    const link = `https://wa.me/${573148924300}?text=${encodeURIComponent(joinText)}`;
+
+    let text = `📩 *Invitación a ${targetGroup.name}*\n\n`;
+    text += `Comparte este mensaje con la persona que quieres invitar:\n\n`;
+    text += `🎉 Te invito a un grupo de ahorro\n\n`;
+    text += `Nombre: ${targetGroup.name}\n`;
+    const trm = session.trm || 4250;
+    text += `Monto: ${formatCOPtoUSD(Number(targetGroup.group_amount), trm)}\n`;
+    text += `Frecuencia: Cada ${targetGroup.payment_interval_days} días\n\n`;
+    text += `👉 Únete aquí:\n${link}\n\n`;
+    text += `(Solo toca el enlace y envía el mensaje automáticamente)`;
+
+    await sendWhatsAppText(from, text);
+}
+
 async function handleVoice(mediaId, from) {
     const inputPath = `./${mediaId}.ogg`;
     const outputPath = `./${mediaId}.mp3`;
@@ -2853,22 +3236,64 @@ async function handleVoice(mediaId, from) {
             displayName: "User Voice Command",
         });
 
-        // 4️⃣ Ask Gemini
+        // 4️⃣ Gather user context
+        const session = sessions[from] || {};
+        const user = await getUser(from);
+        const userAddress = user?.address || session.address;
+        const trm = await getTrm();
+
+        // Get user's groups with full details
+        const groups = await getUserGroups(from);
+        const groupsText = groups.length > 0
+            ? groups.map(g => {
+                const members = (g.members || []).map(m => m.phoneid).join(", ");
+                const totalPaid = Number(g.total_amount_collected) || 0;
+                const myPaid = Number(g.my_total_paid) || 0;
+                return `- ${g.name} (id:${g.id}, aporte COP: ${g.group_amount}, intervalo: ${g.payment_interval_days}d, activo: ${g.is_active}, total: $${totalPaid}, mi aporte: $${myPaid}, miembros: ${members})`;
+            }).join("\n")
+            : "No tiene grupos";
+
+        // Get user balance if address available
+        let balanceText = "Sin cuenta vinculada";
+        if (userAddress) {
+            try {
+                const balance = await UserBalance(userAddress);
+                balanceText = `USDC: ${balance.amountusdc}, XLM: ${balance.amountxlm}`;
+            } catch (e) {
+                balanceText = "No se pudo consultar el saldo";
+            }
+        }
+
+        // Get contacts
         const contacts = await getContacts();
-        const contactsText = contacts
-            .map(c => `- ${c.name}: ${c.address}`)
-            .join("\n");
+        const contactsText = contacts.length > 0
+            ? contacts.map(c => `- ${c.name}: ${c.address}`).join("\n")
+            : "Sin contactos guardados";
+
+        // Get recent transactions
+        let txHistoryText = "Sin transacciones";
+        if (userAddress) {
+            try {
+                const txRes = await conn.query(`
+                    SELECT status, concepto, created_at
+                    FROM stellar_transactionsx
+                    WHERE pubkey = $1
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                `, [userAddress]);
+                if (txRes.rows.length > 0) {
+                    txHistoryText = txRes.rows.map(t =>
+                        `${t.status}: ${t.concepto || "sin concepto"} (${new Date(t.created_at).toLocaleDateString("es-CO")})`
+                    ).join("\n");
+                }
+            } catch (e) {}
+        }
 
         const model = genAI.getGenerativeModel({
             model: "gemini-2.5-flash"
         });
 
-        // Obtener grupos del usuario para contexto de pago
-        const groups = await getUserGroups(from);
-        const groupsText = groups.length > 0
-            ? groups.map(g => `- ${g.name} (aporte: ${formatCOPtoUSD(Number(g.group_amount), trm)})`).join("\n")
-            : "No tiene grupos";
-
+        // 5️⃣ Ask Gemini with full context
         const result = await model.generateContent([
             {
                 fileData: {
@@ -2878,115 +3303,229 @@ async function handleVoice(mediaId, from) {
             },
             {
                 text: `
-You are a crypto wallet assistant.
+You are AUR, a crypto wallet assistant for WhatsApp. The user sent a voice message.
+Listen carefully and determine the intention.
 
-Contacts:
-${contactsText}
+User context:
+- Phone: ${from}
+- Name: ${user?.name || "Usuario"}
+- Wallet address: ${userAddress || "not registered"}
+- Balance: ${balanceText}
+- TRM (USD/COP): ${trm}
 
-Groups (for group payments):
+User's groups:
 ${groupsText}
 
-Return ONLY valid JSON:
+User's contacts:
+${contactsText}
+
+Recent transactions:
+${txHistoryText}
+
+Determine the action and return ONLY valid JSON (no markdown, no backticks):
 {
-  "action": "SEND" | "PAY_GROUP" | "UNKNOWN",
+  "action": "BALANCE" | "WHO_PAID" | "GROUP_STATUS" | "MY_GROUPS" | "TX_HISTORY" | "GROUP_DEBT" | "SEND" | "PAY_GROUP" | "SWAP" | "INVITE" | "UNKNOWN",
   "contact": string | null,
   "address": string | null,
   "amount": string | null,
-  "groupName": string | null
+  "groupName": string | null,
+  "swapDirection": "USDC_XLM" | "XLM_USDC" | null
 }
 
-For PAY_GROUP:
-- If user says "pagar mi grupo", "pagar cuota", "pagar natillera", set action to "PAY_GROUP"
-- Try to match groupName from the user's groups list
-- If no specific group mentioned, set groupName to null
+Action detection rules:
+- "cuanto dinero tengo", "mi saldo", "mi balance", "cuanto tengo" → BALANCE
+- "quien pago", "quien ya pago", "quien ha pagado", "pagos del grupo" → WHO_PAID
+- "como va mi grupo", "como va la natillera", "estado del grupo", "cuanto hemos ahorrado" → GROUP_STATUS
+- "mis grupos", "cuales son mis grupos", "lista de grupos" → MY_GROUPS
+- "mis transacciones", "que he hecho", "historial", "ultimos movimientos" → TX_HISTORY
+- "quien debe", "quien no ha pagado", "deudas del grupo", "cuotas atrasadas" → GROUP_DEBT
+- "envia", "enviar", "manda", "pagar a" + amount + contact → SEND
+- "pagar cuota", "pagar grupo", "pagar natillera", "hacer aporte" → PAY_GROUP
+- "cambia", "cambiar", "swap", "convertir" + amount + direction → SWAP (set swapDirection)
+- "invita", "invitar", "agregar a", "añadir al grupo" → INVITE
+- Anything else → UNKNOWN
+
+For SEND: extract contact name and amount.
+For PAY_GROUP: match groupName from user's groups list. If no specific group mentioned, set groupName to null.
+For SWAP: if user says "cambiar dolares a stellar/pesos" → swapDirection=USDC_XLM. If "cambiar stellar a dolares" → swapDirection=XLM_USDC.
+For INVITE: if user mentions a group name, set groupName. Otherwise null.
 `
             }
         ]);
 
         const clean = extractJson(result.response.text());
         if (!clean) {
-            return sendWhatsAppText(from, "❌ No pude entender la solicitud.");
+            return sendWhatsAppText(from, "❌ No pude entender el mensaje de voz. Intenta de nuevo.");
         }
 
         const parsed = JSON.parse(clean);
+        console.log("🎤 Voice intent:", parsed.action, parsed);
 
-        if (parsed.action === "PAY_GROUP") {
-            // Buscar grupo coincidente
-            let targetGroup = null;
-            
-            if (parsed.groupName) {
-                // Buscar por nombre (case insensitive, partial match)
-                targetGroup = groups.find(g => 
-                    g.name.toLowerCase().includes(parsed.groupName.toLowerCase()) ||
-                    parsed.groupName.toLowerCase().includes(g.name.toLowerCase())
-                );
-            }
-            
-            // Si no encontró por nombre y hay solo 1 grupo, usar ese
-            if (!targetGroup && groups.length === 1) {
-                targetGroup = groups[0];
-            }
-            
-            // Si no se encontró grupo y hay múltiples
-            if (!targetGroup && groups.length > 1) {
-                const trm = session.trm || 4250;
-                const groupOptions = groups.map((g, i) => `${i + 1}. ${g.name} - ${formatCOPtoUSD(Number(g.group_amount), trm)}`).join("\n");
-                await sendWhatsAppText(from, `¿A qué grupo querés pagar?\n\n${groupOptions}\n\nRespondé con el número.`);
-                updateSession(from, {
-                    step: "WAITING_GROUP_SELECTION",
-                    pendingAction: "PAY_GROUP",
-                    groupsCache: groups
+        // 6️⃣ Dispatch to handler
+        switch (parsed.action) {
+            case "BALANCE":
+                await getVoiceBalance(from, { ...session, address: userAddress });
+                break;
+
+            case "WHO_PAID":
+                await getVoiceWhoPaid(from, session, parsed, groups);
+                break;
+
+            case "GROUP_STATUS":
+                await getVoiceGroupStatus(from, session, parsed, groups);
+                break;
+
+            case "MY_GROUPS":
+                await getVoiceMyGroups(from, session);
+                break;
+
+            case "TX_HISTORY":
+                await getVoiceTxHistory(from, { ...session, address: userAddress });
+                break;
+
+            case "GROUP_DEBT":
+                await getVoiceGroupDebt(from, session, parsed, groups);
+                break;
+
+            case "SWAP":
+                await getVoiceSwap(from, { ...session, address: userAddress }, parsed);
+                break;
+
+            case "INVITE":
+                await getVoiceInvite(from, session, parsed, groups);
+                break;
+
+            case "PAY_GROUP": {
+                let targetGroup = null;
+                if (parsed.groupName) {
+                    targetGroup = groups.find(g =>
+                        g.name.toLowerCase().includes(parsed.groupName.toLowerCase()) ||
+                        parsed.groupName.toLowerCase().includes(g.name.toLowerCase())
+                    );
+                }
+                if (!targetGroup && groups.length === 1) targetGroup = groups[0];
+                if (!targetGroup && groups.length === 0) {
+                    await sendWhatsAppText(from, "❌ No tienes grupos activos para pagar.");
+                    break;
+                }
+                if (!targetGroup && groups.length > 1) {
+                    const groupOptions = groups.map((g, i) => `${i + 1}. ${g.name} - ${formatCOPtoUSD(Number(g.group_amount), trm)}`).join("\n");
+                    await sendWhatsAppText(from, `¿A qué grupo quieres pagar?\n\n${groupOptions}\n\nResponde con el número.`);
+                    updateSession(from, {
+                        step: "WAITING_GROUP_SELECTION",
+                        pendingAction: "PAY_GROUP",
+                        groupsCache: groups
+                    });
+                    break;
+                }
+
+                // Verificar saldo antes de confirmar
+                const contributeBalance = await UserBalance(userAddress);
+                const availableUsd = Number(contributeBalance.amountusdc) || 0;
+                const groupAmountCop = Number(targetGroup.group_amount) || 0;
+                const groupAmountUsd = groupAmountCop / trm;
+
+                if (groupAmountUsd > availableUsd) {
+                    await sendWhatsAppText(from,
+                        `⚠️ *Saldo insuficiente*\n\nAporte: ${formatCOPtoUSD(groupAmountCop, trm)}\nTu saldo: ${formatSaldo(availableUsd, trm)}\n\nNecesitas más USDC para aportar a este grupo.`);
+                    break;
+                }
+
+                const amount = (groupAmountUsd).toFixed(7);
+                await sendWhatsAppButtons(from, {
+                    header: `💸 Pagar grupo: ${targetGroup.name}`,
+                    body: `Monto: ${formatCOPtoUSD(groupAmountCop, trm)}\nPara: ${targetGroup.multisig_address.substring(0, 15)}...\n\n¿Confirmar pago?`,
+                    buttons: [
+                        { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
+                        { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
+                    ],
                 });
-                return;
+
+                updateSession(from, {
+                    multisigTransaction: true,
+                    groupId: targetGroup.id,
+                    to: targetGroup.multisig_address,
+                    amount: amount,
+                    groupsCache: groups,
+                    groupMembers: targetGroup.members,
+                    name: user?.name || session.name,
+                    phone: from,
+                    address: userAddress,
+                    tokennotification: user?.tokennotification,
+                });
+                break;
             }
-            
-            // Si no tiene grupos
-            if (!targetGroup && groups.length === 0) {
-                return sendWhatsAppText(from, "❌ No tenés grupos activos para pagar.");
+
+            case "SEND": {
+                if (!parsed.address && !parsed.contact) {
+                    await sendWhatsAppText(from, "📤 ¿A quién quieres enviar?\n\nDime el nombre o pega la dirección Stellar.");
+                    break;
+                }
+
+                // Buscar destinatario por nombre en todos los usuarios del sistema
+                let destAddress = parsed.address;
+                let destName = parsed.contact;
+                if (!destAddress && parsed.contact) {
+                    // Primero buscar en la lista de contacts (que ahora incluye usuarios + secondary_accounts)
+                    const contactMatch = contacts.find(c =>
+                        c.name.toLowerCase().includes(parsed.contact.toLowerCase())
+                    );
+                    if (contactMatch) {
+                        destAddress = contactMatch.address;
+                        destName = contactMatch.name;
+                    } else {
+                        // Si no está en contacts, buscar directamente en DB
+                        const dbMatch = await findRecipientByName(parsed.contact);
+                        if (dbMatch) {
+                            destAddress = dbMatch.address;
+                            destName = dbMatch.name;
+                        }
+                    }
+                }
+
+                if (!destAddress) {
+                    await sendWhatsAppText(from, `❌ No encontré a "${parsed.contact}" en el sistema.\n\nVerifica el nombre o pega la dirección Stellar directamente.`);
+                    break;
+                }
+
+                if (!parsed.amount) {
+                    await sendWhatsAppText(from, "📤 ¿Cuánto quieres enviar?\n\nEjemplo: *envía 20 dólares*");
+                    break;
+                }
+
+                // Verificar saldo
+                const sendBalance = await UserBalance(userAddress);
+                const availableUsd = Number(sendBalance.amountusdc) || 0;
+                if (Number(parsed.amount) > availableUsd) {
+                    await sendWhatsAppText(from,
+                        `⚠️ *Saldo insuficiente*\n\nQuieres enviar: $${parsed.amount} USDC\nTu saldo: ${formatSaldo(availableUsd, trm)}`);
+                    break;
+                }
+
+                await sendWhatsAppButtons(from, {
+                    header: "📤 Enviar dinero",
+                    body: "Para: " + (destName || (destAddress.substring(0, 15) + "...")) + "\nMonto: " + formatWithCop(Number(parsed.amount), trm) + "\n\n¿Confirmar envío?",
+                    buttons: [
+                        { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
+                        { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
+                    ],
+                });
+
+                updateSession(from, {
+                    to: destAddress,
+                    amount: parsed.amount,
+                    name: user?.name || session.name,
+                    phone: from,
+                    address: userAddress,
+                    tokennotification: user?.tokennotification,
+                });
+                break;
             }
-            
-            // Confirmar pago al grupo
-            const amount = parsed.amount || targetGroup.group_amount;
-            const trm = session.trm || 4250;
-            await sendWhatsAppButtons(from, {
-                header: `💸 Pagar grupo: ${targetGroup.name}`,
-                body: `Monto: ${formatCOPtoUSD(Number(amount), trm)}\nAporte mensual: ${formatCOPtoUSD(Number(targetGroup.group_amount), trm)}`,
-                buttons: [
-                    { id: "CONFIRM_VOICE_SEND", title: "✅ Confirmar" },
-                    { id: "CANCEL_VOICE_SEND", title: "❌ Cancelar" },
-                ],
-            });
-            
-            updateSession(from, {
-                multisigTransaction: true,
-                groupId: targetGroup.id,
-                to: targetGroup.multisig_address,
-                amount: amount,
-                groupsCache: groups,
-                groupMembers: targetGroup.members
-            });
-            return;
+
+            default:
+                await sendWhatsAppText(from,
+                    "🤔 No entendí qué quieres hacer.\n\nPuedes decir:\n• *¿Cuánto dinero tengo?*\n• *¿Quién ya pagó?*\n• *Paga mi cuota*\n• *Envía 20 a Rubi*\n• *¿Cómo va mi natillera?*\n• *Cambia 50 dólares*");
         }
-
-        if (parsed.action !== "SEND") {
-            return sendWhatsAppText(from, "🤔 No detecté una solicitud de envío.");
-        }
-
-        // 5️⃣ Confirm
-        await sendWhatsAppButtons(from, {
-            header: "📤 Send request detected",
-            body: `To: ${parsed.contact}\nAmount: ${parsed.amount}`,
-            buttons: [
-                { id: "CONFIRM_VOICE_SEND", title: "✅ Confirm" },
-                { id: "CANCEL_VOICE_SEND", title: "❌ Cancel" },
-            ],
-        });
-
-        // store pending tx
-        updateSession(from, {
-            to: parsed.address,
-            amount: parsed.amount,
-        });
 
     } catch (err) {
         console.error(err);
@@ -3037,13 +3576,44 @@ async function ensureUserContext(data) {
     return { user, session: sessions[from] };
 }
 async function getContacts() {
+    // Buscar en contacts, usuarios y secondary_accounts para tener todos los contactos del sistema
     const query = `
-        SELECT name, address
-        FROM contacts
+        SELECT name, address FROM (
+            SELECT name, address FROM contacts
+            WHERE name IS NOT NULL AND address IS NOT NULL
+            UNION ALL
+            SELECT name, address FROM usuarios
+            WHERE name IS NOT NULL AND address IS NOT NULL
+            UNION ALL
+            SELECT u.name, sa.public_addr AS address
+            FROM secondary_accounts sa
+            JOIN usuarios u ON u.phoneid = sa.phone
+            WHERE u.name IS NOT NULL AND sa.public_addr IS NOT NULL
+        ) all_contacts
         ORDER BY name;
     `;
     const res = await conn.query(query);
     return res.rows;
+}
+
+// Buscar destinatario por nombre en todos los usuarios del sistema
+async function findRecipientByName(searchName) {
+    if (!searchName) return null;
+    const q = `
+        SELECT name, address FROM (
+            SELECT name, address FROM usuarios
+            WHERE name IS NOT NULL AND address IS NOT NULL
+            UNION ALL
+            SELECT u.name, sa.public_addr AS address
+            FROM secondary_accounts sa
+            JOIN usuarios u ON u.phoneid = sa.phone
+            WHERE u.name IS NOT NULL AND sa.public_addr IS NOT NULL
+        ) all_contacts
+        WHERE LOWER(name) LIKE LOWER($1)
+        LIMIT 1;
+    `;
+    const res = await conn.query(q, [`%${searchName}%`]);
+    return res.rows[0] || null;
 }
 async function getUser(phoneid) {
     const query = `
